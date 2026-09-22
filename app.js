@@ -6,7 +6,7 @@
 // ==========================================================
 // ⚙️ CONFIG
 // ==========================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyMIyiP-Kj5oWN0pycp5j5FOwcSKYO8t-pNWClZA_yLuEN-j9baU6orA7PGd7vhZ6Ty/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbw5kOoeNm-1Ybqe9wibO3kGKFj-6Wrb_3FAlRau2ErpJ0iouFJCemWwIIEg_1_GP0xK/exec";
 
 // ==========================================================
 // 🛠️ SHARED UTILITIES (ใช้ร่วมกันทั้ง 2 หน้า)
@@ -89,26 +89,39 @@ function debounce(fn, wait = 250) {
 //    24 ชั่วโมงให้เหมือนกันทุกเครื่องเสมอ
 // ==========================================================
 
-/** สร้าง HTML dropdown เลือกเวลา — prefix ใช้ตั้งชื่อ id (เช่น "startTime" → #startTimeHour, #startTimeMin) */
-function timeSelectHTML(prefix, value) {
+/**
+ * สร้าง HTML dropdown เลือกเวลา — prefix ใช้ตั้งชื่อ id (เช่น "startTime" → #startTimeHour, #startTimeMin)
+ * opts (ไม่ใส่ก็ได้ — ค่าเริ่มต้นคือช่วงเต็มวัน 00-23 / นาทีทีละ 1):
+ *   hourStart, hourEnd  — จำกัดช่วงชั่วโมงที่เลือกได้ (เช่น 6, 18 → เลือกได้แค่ 06-18)
+ *   minuteStep          — ระยะห่างของตัวเลือกนาที (เช่น 5 → 00,05,10,...,55)
+ */
+function timeSelectHTML(prefix, value, opts) {
+  opts = opts || {};
+  const hourStart = opts.hourStart != null ? opts.hourStart : 0;
+  const hourEnd = opts.hourEnd != null ? opts.hourEnd : 23;
+  const minuteStep = opts.minuteStep || 1;
+
   const parts = String(value || '').split(':');
   const h = parts[0] || '', m = parts[1] || '';
 
   const hourOpts = ['<option value="">--</option>'].concat(
-    Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+    Array.from({ length: hourEnd - hourStart + 1 }, (_, i) => String(hourStart + i).padStart(2, '0'))
       .map(hh => `<option value="${hh}"${hh === h ? ' selected' : ''}>${hh}</option>`)
   ).join('');
 
   const minOpts = ['<option value="">--</option>'].concat(
-    Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
+    Array.from({ length: Math.ceil(60 / minuteStep) }, (_, i) => String(i * minuteStep).padStart(2, '0'))
       .map(mm => `<option value="${mm}"${mm === m ? ' selected' : ''}>${mm}</option>`)
   ).join('');
 
+  const hourLabel = `ชั่วโมง (${String(hourStart).padStart(2, '0')}-${String(hourEnd).padStart(2, '0')})`;
+  const minLabel = minuteStep > 1 ? `นาที (ทีละ ${minuteStep})` : 'นาที (00-59)';
+
   return `
     <div class="time-select">
-      <select id="${prefix}Hour" aria-label="ชั่วโมง (00-23)">${hourOpts}</select>
+      <select id="${prefix}Hour" aria-label="${hourLabel}">${hourOpts}</select>
       <span class="time-sep">:</span>
-      <select id="${prefix}Min" aria-label="นาที (00-59)">${minOpts}</select>
+      <select id="${prefix}Min" aria-label="${minLabel}">${minOpts}</select>
       <span class="time-suffix">น.</span>
     </div>`;
 }
@@ -139,8 +152,10 @@ const IndexPage = {
     $('todayLabel').textContent = 'วันที่ ' + formatThaiDate(todayStr());
 
     // สร้าง dropdown เวลาเริ่ม-สิ้นสุด (แทน <input type="time"> เดิม)
-    $('startTimeWrap').innerHTML = timeSelectHTML('startTime');
-    $('endTimeWrap').innerHTML = timeSelectHTML('endTime');
+    // จำกัดช่วงเวลาทำการ 06:00-18:00 นาทีเลือกได้ทีละ 5 นาที และตั้งเวลาเริ่มต้นเป็น 08:00 ไว้ล่วงหน้า
+    const TIME_OPTS = { hourStart: 6, hourEnd: 18, minuteStep: 5 };
+    $('startTimeWrap').innerHTML = timeSelectHTML('startTime', '08:00', TIME_OPTS);
+    $('endTimeWrap').innerHTML = timeSelectHTML('endTime', '', TIME_OPTS);
 
     // ผูก event
     $('date').addEventListener('change', () => {
