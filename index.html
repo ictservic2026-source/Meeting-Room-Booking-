@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบจองห้องประชุม</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=Taviraj:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .page {
+      max-width: 880px; margin: 0 auto;
+      opacity: 0; transform: translateY(8px);
+      animation: pageIn .45s ease forwards;
+    }
+    @keyframes pageIn { to { opacity: 1; transform: translateY(0); } }
+
+    .masthead {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; margin-bottom: 22px; flex-wrap: wrap;
+    }
+    .masthead .eyebrow {
+      font-size: 13px; color: var(--ink-faint); margin: 0 0 4px;
+    }
+    .masthead h1 { font-size: 27px; }
+    .masthead .today {
+      font-size: 13px; color: var(--ink-soft);
+      background: var(--surface); border: 1px solid var(--line);
+      padding: 7px 13px; border-radius: 999px;
+    }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      border-top: 3px solid var(--brass);
+      padding: 32px;
+    }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .group { display: flex; flex-direction: column; }
+    .group.full { grid-column: span 2; }
+    label.title {
+      font-weight: 500; margin-bottom: 8px; font-size: 13.5px;
+      color: var(--ink-soft);
+    }
+    label.req::after { content: " *"; color: var(--busy); }
+
+    input[type="text"], input[type="email"], input[type="number"], input[type="date"], input[type="time"] {
+      padding: 11px 13px; border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm); font-size: 14.5px;
+      background: var(--surface-muted);
+    }
+    input:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+
+    .hint { font-size: 12.5px; color: var(--ink-faint); margin: 6px 0 0; }
+
+    /* ---------- เวลาแบบ Dropdown (ชั่วโมง/นาที) — บังคับรูปแบบ 24 ชม. ทุกเครื่อง ---------- */
+    .time-select { display: flex; align-items: center; gap: 5px; }
+    .time-select select {
+      flex: 1; min-width: 0; padding: 11px 8px; text-align: center;
+      border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+      font-size: 14.5px; background: var(--surface-muted);
+    }
+    .time-select select:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+    .time-select .time-sep { color: var(--ink-faint); font-weight: 600; }
+    .time-select .time-suffix { color: var(--ink-faint); font-size: 12.5px; white-space: nowrap; }
+
+    .radio-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px; }
+    .radio-group label {
+      font-weight: 400; display: flex; align-items: center; gap: 7px;
+      cursor: pointer; padding: 9px 14px; border: 1px solid var(--line-strong);
+      border-radius: 999px; font-size: 14px; background: var(--surface-muted);
+      transition: border-color .12s ease, background .12s ease;
+    }
+    .radio-group input, .check-group input { accent-color: var(--brass); }
+    .radio-group label:has(input:checked) {
+      border-color: var(--brass); background: var(--brass-tint); color: var(--brass-deep);
+    }
+
+    /* ห้องประชุม — การ์ดพร้อมจุดสถานะ */
+    .room-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .room-card {
+      position: relative;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      font-weight: 400; padding: 13px 15px;
+      border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+      cursor: pointer; background: var(--surface-muted);
+      transition: border-color .12s ease, background .12s ease;
+    }
+    .room-card:hover { border-color: var(--brass); }
+    .room-card:has(input:checked) {
+      border-color: var(--brass); background: var(--brass-tint);
+    }
+    .room-card input { position: absolute; opacity: 0; }
+    .room-card-text { display: flex; flex-direction: column; gap: 2px; }
+    .room-name { font-size: 14.5px; font-weight: 500; color: var(--ink); }
+    .room-capacity { font-size: 12.5px; color: var(--ink-faint); }
+    .room-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--line-strong); flex-shrink: 0;
+      transition: background .2s ease;
+    }
+    .room-dot[data-status="available"] { background: var(--available); }
+    .room-dot[data-status="busy"] { background: var(--busy); }
+
+    .info-box {
+      grid-column: span 2;
+      background: var(--surface-muted); padding: 15px 16px;
+      border-radius: var(--radius-md); border-left: 3px solid var(--brass);
+      font-size: 13.5px; display: none;
+    }
+    .info-box h4 {
+      margin: 0 0 8px; color: var(--ink); font-family: var(--font-body);
+      font-size: 13.5px; font-weight: 600;
+    }
+    .info-box ul { margin: 0; padding-left: 18px; }
+    .info-box li { margin-bottom: 5px; }
+
+    .check-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; }
+    .check-group label {
+      font-weight: 400; display: flex; align-items: center; gap: 7px;
+      cursor: pointer; padding: 9px 14px; border: 1px solid var(--line-strong);
+      border-radius: 999px; font-size: 14px; background: var(--surface-muted);
+    }
+    .check-group label:has(input:checked) {
+      border-color: var(--brass); background: var(--brass-tint); color: var(--brass-deep);
+    }
+
+    .submit-btn {
+      width: 100%; margin-top: 26px; padding: 15px;
+      font-size: 15.5px; justify-content: center;
+    }
+
+    @media (max-width: 620px) {
+      .grid, .room-list { grid-template-columns: 1fr; }
+      .group.full, .info-box { grid-column: span 1; }
+      .card { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page">
+  <div class="masthead">
+    <div>
+      <p class="eyebrow">แบบฟอร์มขอใช้ห้องประชุม</p>
+      <h1>จองห้องประชุมภายใน</h1>
+    </div>
+    <span class="today" id="todayLabel"></span>
+  </div>
+
+  <div class="card">
+    <div id="alertBox" class="alert"></div>
+
+    <form id="bookingForm">
+      <div class="grid">
+
+        <div class="group">
+          <label class="title req" for="date">วันที่ต้องการใช้</label>
+          <input type="date" id="date" required>
+        </div>
+
+        <div class="group">
+          <label class="title req">เวลาเริ่ม - สิ้นสุด (24 ชม.)</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <div id="startTimeWrap" style="flex:1;"></div>
+            <span style="color:var(--ink-faint);">ถึง</span>
+            <div id="endTimeWrap" style="flex:1;"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <label class="title req" for="userName">ผู้ขอใช้ (ชื่อ-สกุล)</label>
+          <input type="text" id="userName" placeholder="ระบุชื่อ-นามสกุล" required>
+        </div>
+
+        <div class="group">
+          <label class="title req" for="department">ฝ่าย/แผนก/หน่วยงาน</label>
+          <input type="text" id="department" placeholder="ระบุฝ่าย/แผนก" required>
+        </div>
+
+        <div class="group full">
+          <label class="title req" for="requesterEmail">อีเมลผู้แจ้ง</label>
+          <input type="email" id="requesterEmail" placeholder="name@nissei.co.th" autocomplete="email" required>
+          <p class="hint">ใช้รับอีเมลแจ้งผลการจอง (อนุมัติ / ยกเลิก / เปลี่ยนห้อง)</p>
+        </div>
+
+        <div class="group">
+          <label class="title req">วัตถุประสงค์</label>
+          <div class="radio-group">
+            <label><input type="radio" name="purpose" value="ประชุมภายใน" required> ประชุมภายใน</label>
+            <label><input type="radio" name="purpose" value="ออนไลน์" required> ออนไลน์</label>
+          </div>
+        </div>
+
+        <div class="group">
+          <label class="title req" for="attendees">ผู้เข้าร่วม (จำนวน)</label>
+          <input type="number" id="attendees" min="1" placeholder="จำนวนคน" required>
+        </div>
+
+        <div class="group full">
+          <label class="title req">ห้องที่ต้องการใช้</label>
+          <div class="room-list" id="roomList"></div>
+        </div>
+
+        <div id="bookingInfo" class="info-box">
+          <h4>รายการจองของห้องนี้ในวันที่เลือก</h4>
+          <ul id="bookingList"></ul>
+        </div>
+
+        <div class="group full">
+          <label class="title">อุปกรณ์ที่ต้องการใช้งาน</label>
+          <div class="check-group">
+            <label><input type="checkbox" name="equipment" value="LCD PROJECTOR"> LCD PROJECTOR</label>
+            <label><input type="checkbox" name="equipment" value="NOTEBOOK"> NOTEBOOK</label>
+            <label><input type="checkbox" name="equipment" value="ลำโพง/ไมโครโฟนปลาดาว"> ลำโพง/ไมโครโฟนปลาดาว</label>
+            <label><input type="checkbox" name="equipment" value="ZOOM PROGRAM"> ZOOM PROGRAM</label>
+          </div>
+          <div style="margin-top:12px;">
+            <label style="font-weight:400; display:flex; align-items:center; gap:7px; cursor:pointer; font-size:14px;">
+              <input type="checkbox" id="otherCheck" style="accent-color:var(--brass);"> อื่นๆ (โปรดระบุ)
+            </label>
+            <input type="text" id="otherEquipment" placeholder="ระบุอุปกรณ์เพิ่มเติม..."
+                   style="margin-top:8px; display:none; width:100%;">
+          </div>
+        </div>
+
+      </div>
+
+      <button type="submit" class="btn btn-brass submit-btn" id="submitBtn">ส่งคำขอจองห้องประชุม</button>
+    </form>
+  </div>
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>

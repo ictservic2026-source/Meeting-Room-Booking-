@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - ระบบจองห้องประชุม</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=Taviraj:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .container { max-width: 1320px; margin: 0 auto; }
+
+    /* ---------- หน้าล็อกอินผู้ดูแล ---------- */
+    .auth-gate {
+      position: fixed; inset: 0; z-index: 2000;
+      background: var(--ink);
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .auth-card {
+      background: var(--surface); width: 100%; max-width: 380px;
+      border-radius: var(--radius-lg); padding: 32px;
+      border-top: 3px solid var(--brass);
+      box-shadow: var(--shadow-pop);
+    }
+    .auth-card h2 { font-size: 21px; margin-bottom: 6px; }
+    .auth-card p { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 20px; }
+    .auth-card label { display: block; font-size: 13px; margin: 14px 0 6px; color: var(--ink-soft); font-weight: 500; }
+    .auth-card input {
+      width: 100%; padding: 11px 13px; border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm); font-size: 14.5px;
+    }
+    .auth-card input:focus { outline: none; border-color: var(--brass); }
+    .auth-error {
+      color: var(--busy); font-size: 13px; margin-top: 10px; min-height: 16px;
+    }
+    .auth-card .btn { width: 100%; justify-content: center; margin-top: 18px; }
+
+    /* ---------- Header ---------- */
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 22px; flex-wrap: wrap; gap: 10px;
+    }
+    .header .eyebrow { font-size: 13px; color: var(--ink-faint); margin: 0 0 3px; }
+    .header h1 { font-size: 24px; }
+    .header-btns { display: flex; gap: 10px; align-items: center; }
+    .admin-who {
+      font-size: 13px; color: var(--ink-soft); margin-right: 4px;
+    }
+
+    /* ---------- Stat bar (กดที่การ์ดเพื่อกรองตารางได้) ---------- */
+    .stat-bar { display: flex; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+    .stat-card {
+      flex: 1; min-width: 138px; background: var(--surface);
+      padding: 16px 18px; border-radius: var(--radius-md);
+      box-shadow: var(--shadow-card);
+      border: 0; border-bottom: 3px solid var(--line);
+      display: flex; flex-direction: column; align-items: flex-start;
+      text-align: left; cursor: pointer; font-family: var(--font-body);
+      transition: box-shadow .12s ease;
+    }
+    .stat-card:hover { box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-card); }
+    .stat-card.active { box-shadow: 0 0 0 2px var(--brass), var(--shadow-card); }
+    .stat-label { font-size: 12px; color: var(--ink-faint); font-weight: 500; }
+    .stat-num {
+      margin-top: 6px; font-size: 26px; font-weight: 500; line-height: 1.3;
+      font-family: var(--font-display); color: var(--ink);
+    }
+    .stat-card.c-total    { border-bottom-color: var(--brass); }
+    .stat-card.c-pending  { border-bottom-color: var(--pending); }
+    .stat-card.c-confirm  { border-bottom-color: var(--done); }
+    .stat-card.c-done     { border-bottom-color: var(--complete); }
+    .stat-card.c-done .stat-num { color: var(--complete); }
+    .stat-card.c-cancel   { border-bottom-color: var(--busy); }
+    .stat-card.c-today    { border-bottom-color: var(--brass-deep); }
+
+    /* ---------- Filters ---------- */
+    .filters {
+      background: var(--surface); padding: 14px; border-radius: var(--radius-md);
+      margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;
+      box-shadow: var(--shadow-card);
+    }
+    .filters select, .filters input {
+      padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+      font-size: 14px; background: var(--surface-muted);
+    }
+    .filters select:focus, .filters input:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+
+    /* ---------- ตาราง ---------- */
+    .table-wrap {
+      background: var(--surface); border-radius: var(--radius-md); overflow: auto;
+      box-shadow: var(--shadow-card); max-height: 72vh;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 1150px; }
+    th, td {
+      padding: 13px 15px; text-align: left;
+      border-bottom: 1px solid var(--line); font-size: 13px;
+      vertical-align: top;
+    }
+    th {
+      background: var(--surface-muted); font-weight: 600; color: var(--ink-soft);
+      position: sticky; top: 0; z-index: 1;
+    }
+    tbody tr:hover { background: var(--surface-muted); }
+
+    /* รายการที่เสร็จแล้ว = พื้นเขียวอ่อน + แถบเขียวด้านซ้าย */
+    tbody tr.row-done { background: var(--complete-row); }
+    tbody tr.row-done:hover { background: var(--complete-row-hover); }
+    tbody tr.row-done td:first-child { box-shadow: inset 5px 0 0 var(--complete); }
+
+    /* แถวคลิกได้ → เปิดรายละเอียดเต็ม */
+    tbody tr[data-id] { cursor: pointer; }
+    tbody tr[data-id]:focus-visible { outline-offset: -2px; }
+
+    /* ---------- หน้าต่างรายละเอียดรายการจอง ---------- */
+    .detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .detail-id { font-size: 12.5px; color: var(--ink-faint); margin: 4px 0 0; }
+    .detail-list { display: grid; grid-template-columns: 112px 1fr; margin: 14px 0 0; }
+    .detail-list dt, .detail-list dd {
+      margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13.5px;
+    }
+    .detail-list dt { color: var(--ink-faint); padding-right: 10px; }
+    .detail-list dd { color: var(--ink); word-break: break-word; }
+
+    /* ---------- แถบสรุปผลเหนือตาราง + ปุ่ม Export ---------- */
+    .result-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+      font-size: 13.5px; color: var(--ink-soft);
+    }
+    .result-bar b { color: var(--ink); font-weight: 600; }
+    .result-counts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .count-chip {
+      padding: 3px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 500;
+      background: var(--surface); border: 1px solid var(--line);
+    }
+    .count-chip.done { background: var(--complete); border-color: var(--complete); color: #fff; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 5px; }
+    .actions button {
+      padding: 6px 10px; border: 1px solid transparent; border-radius: 999px;
+      cursor: pointer; font-size: 11.5px; font-weight: 500;
+      font-family: var(--font-body); white-space: nowrap;
+      transition: filter .1s ease;
+    }
+    .actions button:hover { filter: brightness(0.95); }
+    .btn-confirm  { background: var(--available-bg); color: var(--available); }
+    .btn-cancel   { background: var(--pending-bg); color: var(--pending); }
+    .btn-delete   { background: var(--busy-bg); color: var(--busy); }
+    .btn-move     { background: var(--done-bg); color: var(--done); }
+    .btn-swap     { background: #EDE6F5; color: #6B4A96; }
+    .btn-edit     { background: var(--surface-muted); color: var(--ink-soft); border-color: var(--line-strong); }
+    .btn-complete { background: var(--brass-tint); color: var(--brass-deep); }
+
+    /* ---------- เวลาแบบ Dropdown (ชั่วโมง/นาที) — ใช้ในหน้าต่างแก้ไข/บันทึกเสร็จสิ้น ---------- */
+    .time-select { display: flex; align-items: center; gap: 5px; margin-bottom: 10px; }
+    .time-select select {
+      flex: 1; min-width: 0; padding: 10px 8px; text-align: center;
+      border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+      font-size: 14px; background: var(--surface-muted);
+    }
+    .time-select select:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+    .time-select .time-sep { color: var(--ink-faint); font-weight: 600; }
+    .time-select .time-suffix { color: var(--ink-faint); font-size: 12.5px; white-space: nowrap; }
+
+    /* ---------- ช่องหมายเหตุ Admin ในหน้าต่าง ย้าย/สลับ/ยกเลิก/บันทึกเสร็จสิ้น ---------- */
+    .modal textarea {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm); font-size: 13.5px; font-family: var(--font-body);
+      resize: vertical; background: var(--surface-muted); margin-bottom: 10px;
+    }
+    .modal textarea:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+  </style>
+</head>
+<body>
+
+<div class="auth-gate" id="authGate">
+  <div class="auth-card">
+    <h2>เข้าสู่ระบบผู้ดูแล</h2>
+    <p>กรอกรหัสผ่านผู้ดูแลเพื่อจัดการรายการจองห้องประชุม</p>
+    <label for="authName">ชื่อผู้ดูแล</label>
+    <input type="text" id="authName" placeholder="เช่น สมชาย ใจดี (ฝ่าย PR)">
+    <label for="authKey">รหัสผ่านผู้ดูแล</label>
+    <input type="password" id="authKey" placeholder="รหัสผ่าน">
+    <div class="auth-error" id="authError"></div>
+    <button class="btn btn-brass" id="authSubmit">เข้าสู่ระบบ</button>
+  </div>
+</div>
+
+<div class="container" id="mainContainer" style="display:none;">
+  <div class="header">
+    <div>
+      <p class="eyebrow">แผงควบคุมการจอง</p>
+      <h1>จัดการรายการจองห้องประชุม</h1>
+    </div>
+    <div class="header-btns">
+      <span class="admin-who" id="adminWho"></span>
+      <button class="btn btn-outline" id="logoutBtn">ออกจากระบบ</button>
+      <button class="btn btn-outline" onclick="AdminPage.loadData()">รีเฟรช</button>
+      <a class="btn btn-brass" href="index.html">กลับหน้าจอง</a>
+    </div>
+  </div>
+
+  <div id="alertBox" class="alert"></div>
+
+  <div class="stat-bar" id="statBar">
+    <button type="button" class="stat-card c-total" data-filter=""><span class="stat-label">รายการทั้งหมด</span><span class="stat-num" id="statTotal">-</span></button>
+    <button type="button" class="stat-card c-pending" data-filter="รออนุมัติ"><span class="stat-label">รออนุมัติ</span><span class="stat-num" id="statPending">-</span></button>
+    <button type="button" class="stat-card c-confirm" data-filter="ยืนยันแล้ว"><span class="stat-label">ยืนยันแล้ว</span><span class="stat-num" id="statConfirmed">-</span></button>
+    <button type="button" class="stat-card c-done" data-filter="__done"><span class="stat-label">เสร็จแล้ว</span><span class="stat-num" id="statCompleted">-</span></button>
+    <button type="button" class="stat-card c-cancel" data-filter="ยกเลิก"><span class="stat-label">ยกเลิก</span><span class="stat-num" id="statCancelled">-</span></button>
+    <button type="button" class="stat-card c-today" data-filter="__today"><span class="stat-label">วันนี้</span><span class="stat-num" id="statToday">-</span></button>
+  </div>
+
+  <div class="filters">
+    <select id="filterStatus">
+      <option value="">-- ทุกสถานะ --</option>
+      <option value="__done">เสร็จแล้ว (เสร็จสิ้น + เสร็จก่อนเวลา)</option>
+      <option value="ยืนยันแล้ว">ยืนยันแล้ว</option>
+      <option value="รออนุมัติ">รออนุมัติ</option>
+      <option value="ยกเลิก">ยกเลิก</option>
+      <option value="เสร็จสิ้น">เสร็จสิ้น</option>
+      <option value="เสร็จก่อนเวลา">เสร็จก่อนเวลา</option>
+    </select>
+    <select id="filterRoom">
+      <option value="">-- ทุกห้อง --</option>
+    </select>
+    <input type="date" id="filterDate">
+    <input type="text" id="searchBox" placeholder="ค้นหาชื่อ / ฝ่าย..." style="flex:1; min-width:200px;">
+    <button class="btn btn-outline" onclick="AdminPage.clearFilters()">ล้างตัวกรอง</button>
+  </div>
+
+  <div class="result-bar">
+    <div class="result-counts" id="resultCounts"></div>
+    <button class="btn btn-brass" id="exportBtn" onclick="AdminPage.exportExcel()">ส่งออก Excel</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>วันที่ / แจ้ง</th>
+          <th>เวลา</th>
+          <th>ผู้ขอใช้ / ฝ่าย</th>
+          <th>ห้อง</th>
+          <th>ผู้เข้าร่วม</th>
+          <th>อุปกรณ์</th>
+          <th>สถานะ</th>
+          <th>จัดการ</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="8" style="text-align:center; padding:30px;">กำลังโหลด...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- SheetJS: ใช้สร้างไฟล์ Excel (.xlsx) ในเบราว์เซอร์ — ถ้าโหลดไม่ได้ ระบบจะสำรองเป็น CSV ให้อัตโนมัติ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
