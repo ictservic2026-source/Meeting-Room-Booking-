@@ -6,7 +6,7 @@
 // ==========================================================
 // ⚙️ CONFIG
 // ==========================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyFuq4KtiTqJuP_ibd76YrXGBAPd2XG9YMHCFhpsy0EEPVRmR8DMoBK3EA6GLOnaRU/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxDxvP90zlkPhlQDPM0rvv58YoMLgAWI0-EDqLDyU5lmGHeLllpj7QEwkrcbTViTyY/exec";
 
 // ==========================================================
 // 🛠️ SHARED UTILITIES (ใช้ร่วมกันทั้ง 2 หน้า)
