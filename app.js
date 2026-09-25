@@ -6,7 +6,7 @@
 // ==========================================================
 // ⚙️ CONFIG
 // ==========================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbyMIyiP-Kj5oWN0pycp5j5FOwcSKYO8t-pNWClZA_yLuEN-j9baU6orA7PGd7vhZ6Ty/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbyze1VVq7P-WfL_MECwZZwdiyuAPQN49NAowzFI-ltgMmJ8AXJS1EwtPjRvNVUhV6q-/exec";
 
 // ==========================================================
 // 🛠️ SHARED UTILITIES (ใช้ร่วมกันทั้ง 2 หน้า)
@@ -390,11 +390,19 @@ const AdminAuth = {
 // ==========================================================
 const AdminPage = {
   state: { bookings: [], rooms: [] },
+  // ✅ ใหม่ (v4.2): จำนวนรายการ/หน้า (ตั้งต้น 10), หน้าปัจจุบัน, และแถวที่กำลังขยายเมนู "⋯" อยู่
+  page: 1,
+  pageSize: 10,
+  expandedId: null,
+
+  STATUS_LIST: ['รออนุมัติ', 'ยืนยันแล้ว', '__done', 'ยกเลิก'],
+  STATUS_LABEL: { 'รออนุมัติ': 'รออนุมัติ', 'ยืนยันแล้ว': 'ยืนยันแล้ว', '__done': 'เสร็จแล้ว', 'ยกเลิก': 'ยกเลิก' },
 
   /** เสร็จแล้ว = "เสร็จสิ้น" หรือ "เสร็จก่อนเวลา" */
   isDone(status) { return status === 'เสร็จสิ้น' || status === 'เสร็จก่อนเวลา'; },
 
   async init() {
+    this.renderStatusChips();
     await this.loadData();
   },
 
@@ -411,6 +419,7 @@ const AdminPage = {
             `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}</option>`
           ).join('');
         $('filterRoom').value = current;
+        this.renderRoomChips();
       }
 
       // โหลดรายการจองทั้งหมด วนทีละหน้า (หน้าละ 200) — ไม่ตกหล่นเมื่อมีเกิน 200 รายการ
@@ -487,6 +496,8 @@ const AdminPage = {
     const filtered = this.getFiltered();
     this.renderResultBar(filtered);
     this.syncStatCards();
+    this.syncFilterChips();
+    this.renderPager(filtered.length);
 
     const tbody = $('tableBody');
     if (filtered.length === 0) {
@@ -494,15 +505,22 @@ const AdminPage = {
       return;
     }
 
-    tbody.innerHTML = filtered.map(b => this.renderRow(b)).join('');
+    const start = this.pageSize === Infinity ? 0 : (this.page - 1) * this.pageSize;
+    const end = this.pageSize === Infinity ? filtered.length : start + this.pageSize;
+    const pageRows = filtered.slice(start, end);
+
+    tbody.innerHTML = pageRows.map(b => this.renderRow(b)).join('');
   },
 
   /** แถบสรุปเหนือตาราง: แสดงกี่รายการ / เสร็จแล้วกี่รายการ (นับตามตัวกรองที่เลือกอยู่) */
   renderResultBar(filtered) {
     const c = this.countByStatus(filtered);
     const done = c['เสร็จสิ้น'] + c['เสร็จก่อนเวลา'];
+    const start = this.pageSize === Infinity ? 0 : (this.page - 1) * this.pageSize;
+    const end = this.pageSize === Infinity ? filtered.length : Math.min(filtered.length, start + this.pageSize);
+    const rangeText = filtered.length === 0 ? '' : `(${start + 1}-${end}) `;
     $('resultCounts').innerHTML = `
-      <span>แสดง <b>${filtered.length}</b> จาก ${this.state.bookings.length} รายการ</span>
+      <span>แสดง ${rangeText}<b>${filtered.length}</b> จาก ${this.state.bookings.length} รายการ</span>
       <span class="count-chip done">เสร็จแล้ว ${done}</span>
       <span class="count-chip">รออนุมัติ ${c['รออนุมัติ']}</span>
       <span class="count-chip">ยืนยันแล้ว ${c['ยืนยันแล้ว']}</span>
@@ -524,6 +542,7 @@ const AdminPage = {
         } else {
           $('filterStatus').value = $('filterStatus').value === f ? '' : f;
         }
+        this.page = 1;
         this.renderTable();
       });
     });
@@ -540,7 +559,95 @@ const AdminPage = {
     });
   },
 
-  /** 1 แถวของตาราง */
+  // ---- ตัวกรองแบบ chip (v4.2) — เขียนค่าลง select ที่ซ่อนไว้ เพื่อให้ getFiltered() เดิมทำงานเหมือนเดิม ----
+
+  renderStatusChips() {
+    $('statusChips').innerHTML = this.STATUS_LIST.map(v =>
+      `<button type="button" class="filter-chip" data-val="${v}" onclick="AdminPage.toggleStatusChip('${v}')">${this.STATUS_LABEL[v]}</button>`
+    ).join('') + `<button type="button" class="filter-chip" data-val="" onclick="AdminPage.toggleStatusChip('')">ทั้งหมด</button>`;
+  },
+
+  renderRoomChips() {
+    $('roomChips').innerHTML =
+      `<button type="button" class="filter-chip" data-val="" onclick="AdminPage.toggleRoomChip('')">ทุกห้อง</button>` +
+      this.state.rooms.map(r =>
+        `<button type="button" class="filter-chip" data-val="${escapeHtml(r.name)}" onclick="AdminPage.toggleRoomChip('${escapeHtml(r.name)}')">${escapeHtml(r.name)}</button>`
+      ).join('');
+  },
+
+  toggleStatusChip(v) {
+    $('filterStatus').value = $('filterStatus').value === v ? '' : v;
+    this.page = 1;
+    this.renderTable();
+  },
+
+  toggleRoomChip(v) {
+    $('filterRoom').value = $('filterRoom').value === v ? '' : v;
+    this.page = 1;
+    this.renderTable();
+  },
+
+  /** ไฮไลต์ chip ที่ตรงกับตัวกรองปัจจุบัน */
+  syncFilterChips() {
+    const st = $('filterStatus').value, rm = $('filterRoom').value;
+    document.querySelectorAll('#statusChips .filter-chip').forEach(c => c.classList.toggle('active', c.dataset.val === st));
+    document.querySelectorAll('#roomChips .filter-chip').forEach(c => c.classList.toggle('active', c.dataset.val === rm));
+  },
+
+  setQuickDate(which) {
+    const d = new Date();
+    if (which === 'tomorrow') d.setDate(d.getDate() + 1);
+    const iso = d.toISOString().slice(0, 10);
+    $('filterDate').value = $('filterDate').value === iso ? '' : iso;
+    this.page = 1;
+    this.renderTable();
+  },
+
+  setPageSize(v) {
+    this.pageSize = v === 'all' ? Infinity : parseInt(v, 10);
+    this.page = 1;
+    this.renderTable();
+  },
+
+  goPage(delta) {
+    this.page += delta;
+    this.renderTable();
+  },
+
+  /** เมนู "⋯" — ขยาย/ยุบแถวปุ่มจัดการที่เหลือของแถวนั้น (ยุบแถวอื่นที่เปิดอยู่ก่อนหน้าเสมอ) */
+  toggleMenu(id) {
+    this.expandedId = this.expandedId === id ? null : id;
+    this.renderTable();
+  },
+
+  /** แสดงปุ่ม prev/next + เลขหน้า ใต้ตาราง */
+  renderPager(totalCount) {
+    const el = $('pagerBar');
+    if (this.pageSize === Infinity) { el.innerHTML = ''; return; }
+    const totalPages = Math.max(1, Math.ceil(totalCount / this.pageSize));
+    if (this.page > totalPages) this.page = totalPages;
+    el.innerHTML = `
+      <button onclick="AdminPage.goPage(-1)" ${this.page <= 1 ? 'disabled' : ''}>ก่อนหน้า</button>
+      <span>หน้า ${this.page} / ${totalPages}</span>
+      <button onclick="AdminPage.goPage(1)" ${this.page >= totalPages ? 'disabled' : ''}>ถัดไป</button>
+    `;
+  },
+
+  /** ตรวจห้องว่าง/ชนกันฝั่ง client (ใช้ตอนเปิดหน้าต่างย้าย/อนุมัติ เพื่อโชว์ผลทันทีโดยไม่ต้องรอ backend ตอบ error) */
+  findConflictClient(room, date, start, end, excludeId) {
+    for (const r of this.state.bookings) {
+      if (r.id === excludeId || r.room !== room || r.date !== date || r.status === 'ยกเลิก') continue;
+      const effectiveEnd = r.actualEndTime || r.endTime;
+      if ((start >= r.startTime && start < effectiveEnd) ||
+          (end > r.startTime && end <= effectiveEnd) ||
+          (start <= r.startTime && end >= effectiveEnd)) {
+        return r;
+      }
+    }
+    return null;
+  },
+
+  /** 1 แถวของตาราง + แถวเมนู "⋯" ที่ขยายได้ (คืนมาเป็น 1 หรือ 2 <tr> รวมกัน) */
   renderRow(b) {
     const badge = this.getBadgeClass(b.status);
     const time = b.actualEndTime
@@ -553,36 +660,53 @@ const AdminPage = {
 
     const isDone = this.isDone(b.status);
     const isCancelled = b.status === 'ยกเลิก';
+    const canAct = !isDone && !isCancelled;
     const email = b.requesterEmail
       ? `<br><small style="color:var(--ink-faint);">${escapeHtml(b.requesterEmail)}</small>` : '';
+    const noteLine = b.adminComment
+      ? `<br><small style="color:var(--ink-faint);">หมายเหตุ: ${escapeHtml(b.adminComment)}</small>` : '';
 
-    return `
+    // ปุ่มหลัก 1 ปุ่ม/แถว ตามสถานะที่น่าจะเป็นขั้นต่อไป — ที่เหลือซ่อนไว้ในเมนู "⋯"
+    let primary = '';
+    if (b.status === 'รออนุมัติ') {
+      primary = `<button class="btn-confirm" onclick="AdminPage.openConfirm('${b.id}')">อนุมัติ</button>`;
+    } else if (canAct) {
+      primary = `<button class="btn-complete" onclick="AdminPage.openComplete('${b.id}')">เสร็จสิ้น</button>`;
+    }
+    const menuOpen = this.expandedId === b.id;
+    const menuBtn = `<button class="btn-more ${menuOpen ? 'open' : ''}" aria-label="เพิ่มเติม" onclick="AdminPage.toggleMenu('${b.id}')">⋯</button>`;
+
+    const mainRow = `
       <tr class="${isDone ? 'row-done' : ''}" data-id="${escapeHtml(b.id)}" tabindex="0" title="คลิกเพื่อดูรายละเอียด">
         <td><strong>${formatThaiDate(b.date)}</strong><br>
             <small style="color:var(--ink-faint);">แจ้ง: ${escapeHtml(b.timestamp || '-')}</small></td>
         <td>${time}</td>
         <td><strong>${escapeHtml(b.userName || '-')}</strong><br>
-            <small style="color:var(--ink-soft);">${escapeHtml(b.department || '-')}</small>${email}</td>
+            <small style="color:var(--ink-soft);">${escapeHtml(b.department || '-')}</small>${email}${noteLine}</td>
         <td>${escapeHtml(b.room || '-')}</td>
         <td style="text-align:center;">${b.attendees || 0} คน</td>
         <td><small>${equip}</small></td>
         <td><span class="badge ${badge}">${escapeHtml(b.status)}</span></td>
-        <td class="actions">
-          ${b.status !== 'ยืนยันแล้ว' && !isDone
-            ? `<button class="btn-confirm" onclick="AdminPage.confirmBooking('${b.id}')">ยืนยัน</button>` : ''}
-          ${!isCancelled && !isDone
-            ? `<button class="btn-cancel" onclick="AdminPage.openCancel('${b.id}')">ยกเลิก</button>` : ''}
-          ${!isCancelled && !isDone
-            ? `<button class="btn-move" onclick="AdminPage.openMove('${b.id}')">ย้ายห้อง</button>` : ''}
-          ${!isCancelled && !isDone
-            ? `<button class="btn-swap" onclick="AdminPage.openSwap('${b.id}')">สลับ</button>` : ''}
-          ${!isCancelled && !isDone
-            ? `<button class="btn-complete" onclick="AdminPage.openComplete('${b.id}')">เสร็จสิ้น</button>` : ''}
-          <button class="btn-edit" onclick="AdminPage.openEdit('${b.id}')">แก้ไข</button>
-          <button class="btn-delete" onclick="AdminPage.deleteBooking('${b.id}')">ลบ</button>
-        </td>
+        <td class="actions"><div class="actions-primary">${primary}${menuBtn}</div></td>
       </tr>
     `;
+
+    if (!menuOpen) return mainRow;
+
+    const extraBtns = [
+      canAct ? `<button class="btn-move" onclick="AdminPage.openMove('${b.id}')">ย้ายห้อง</button>` : '',
+      canAct ? `<button class="btn-swap" onclick="AdminPage.openSwap('${b.id}')">สลับ</button>` : '',
+      canAct ? `<button class="btn-cancel" onclick="AdminPage.openCancel('${b.id}')">ยกเลิก</button>` : '',
+      `<button class="btn-edit" onclick="AdminPage.openEdit('${b.id}')">แก้ไขเวลา/ข้อมูล</button>`,
+      `<button class="btn-delete" onclick="AdminPage.deleteBooking('${b.id}')">ลบ</button>`
+    ].join('');
+
+    const expandRow = `
+      <tr class="row-expand">
+        <td colspan="8"><div class="actions">${extraBtns}</div></td>
+      </tr>
+    `;
+    return mainRow + expandRow;
   },
 
   getBadgeClass(status) {
@@ -596,17 +720,84 @@ const AdminPage = {
     }
   },
 
-  // ---- Actions (ทุก action แนบ apiKey ของผู้ดูแล + อัปเดต state ในเครื่องแทนการโหลดใหม่ทั้งหมด) ----
+  // ---- Confirm / อนุมัติ ----
 
-  async confirmBooking(id) {
-    if (!confirm('ยืนยันรายการนี้?')) return;
-    const json = await callAPI({ action: 'bookings.confirm', id, by: AdminAuth.name, apiKey: AdminAuth.key });
-    this.handleResponse(json, () => this.patchBooking(id, { status: 'ยืนยันแล้ว' }));
+  openConfirm(id) {
+    const b = this.state.bookings.find(x => x.id === id);
+    if (!b) return;
+    this.expandedId = null;
+
+    const options = this.state.rooms
+      .map(r => `<option value="${escapeHtml(r.name)}" ${r.name === b.room ? 'selected' : ''}>${escapeHtml(r.name)} (${r.capacity})</option>`)
+      .join('');
+
+    Modal.show(`
+      <h3>อนุมัติการจอง</h3>
+      <p style="color:var(--ink-soft); font-size:13px;">
+        ${escapeHtml(b.userName)} — ห้องที่ขอ: <strong>${escapeHtml(b.room)}</strong><br>
+        วันที่: ${formatThaiDate(b.date)} เวลา ${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}
+      </p>
+      <label>ห้องที่จะอนุมัติ</label>
+      <select id="confirmRoom" onchange="AdminPage.onConfirmRoomChange('${b.id}')">${options}</select>
+      <div id="confirmConflictBox"></div>
+      <label id="confirmCommentLabel">หมายเหตุ (ไม่บังคับ)</label>
+      <textarea id="confirmComment" rows="2" placeholder="จำเป็นถ้าอนุมัติคนละห้องกับที่ขอ..."></textarea>
+      <div class="field-error" id="confirmErr"></div>
+      <div class="modal-btns">
+        <button class="close" onclick="Modal.close()">ปิด</button>
+        <button class="save" onclick="AdminPage.doConfirm('${b.id}')">ยืนยันอนุมัติ</button>
+      </div>
+    `);
+    this.onConfirmRoomChange(id);
+  },
+
+  /** อัปเดต UI ตอนเปลี่ยนห้องที่จะอนุมัติ: เช็คห้องว่าง + สลับ label เป็นบังคับถ้าเปลี่ยนห้อง */
+  onConfirmRoomChange(id) {
+    const b = this.state.bookings.find(x => x.id === id);
+    const selRoom = $('confirmRoom').value;
+    const changed = selRoom !== b.room;
+    const conflict = changed ? this.findConflictClient(selRoom, b.date, b.startTime, b.endTime, b.id) : null;
+
+    $('confirmConflictBox').innerHTML = conflict
+      ? `<div class="conflict-box">ห้องนี้ไม่ว่างช่วงเวลานี้ — ชนกับ ${escapeHtml(conflict.userName)} (${escapeHtml(conflict.startTime)}-${escapeHtml(conflict.endTime)}) กรุณาเลือกห้องอื่น</div>`
+      : '';
+    $('confirmCommentLabel').textContent = changed ? 'เหตุผล (จำเป็น — เปลี่ยนห้องจากที่ขอ)' : 'หมายเหตุ (ไม่บังคับ)';
+    $('confirmCommentLabel').classList.toggle('req-label', changed);
+    $('confirmErr').textContent = '';
+  },
+
+  async doConfirm(id) {
+    const b = this.state.bookings.find(x => x.id === id);
+    const room = $('confirmRoom').value;
+    const comment = $('confirmComment').value.trim();
+    const changed = room !== b.room;
+    const err = $('confirmErr');
+
+    if (changed && this.findConflictClient(room, b.date, b.startTime, b.endTime, b.id)) {
+      err.textContent = 'ห้องนี้ไม่ว่างช่วงเวลานี้ — กรุณาเลือกห้องอื่น';
+      return;
+    }
+    if (changed && !comment) {
+      err.textContent = 'กรุณาระบุเหตุผลที่อนุมัติคนละห้องกับที่ขอ (จะแนบไปกับอีเมลแจ้งผู้จอง)';
+      return;
+    }
+
+    const json = await callAPI({
+      action: 'bookings.confirm', id, room: changed ? room : undefined,
+      comment, by: AdminAuth.name, apiKey: AdminAuth.key
+    });
+    this.handleResponse(json, () => {
+      const updates = { status: 'ยืนยันแล้ว' };
+      if (changed) updates.room = room;
+      if (comment) updates.adminComment = comment;
+      this.patchBooking(id, updates);
+    });
   },
 
   openCancel(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
+    this.expandedId = null;
 
     Modal.show(`
       <h3>ยกเลิกรายการจอง</h3>
@@ -614,8 +805,9 @@ const AdminPage = {
         ${escapeHtml(b.userName)} — ${escapeHtml(b.room)}<br>
         วันที่: ${formatThaiDate(b.date)} เวลา ${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}
       </p>
-      <label>หมายเหตุ (จะแนบไปกับอีเมลแจ้งผู้จอง ให้ทราบเหตุผลที่ยกเลิก)</label>
+      <label class="req-label">เหตุผล (จะแนบไปกับอีเมลแจ้งผู้จอง ให้ทราบเหตุผลที่ยกเลิก)</label>
       <textarea id="cancelComment" rows="2" placeholder="เช่น ห้องไม่ว่างเนื่องจากงานเร่งด่วน / ขอยกเลิกตามคำร้องขอ..."></textarea>
+      <div class="field-error" id="cancelErr"></div>
       <div class="modal-btns">
         <button class="close" onclick="Modal.close()">ปิด</button>
         <button class="save" onclick="AdminPage.doCancel('${b.id}')">ยืนยันยกเลิก</button>
@@ -625,16 +817,17 @@ const AdminPage = {
 
   async doCancel(id) {
     const comment = $('cancelComment').value.trim();
+    if (!comment) {
+      $('cancelErr').textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งผู้จอง)';
+      return;
+    }
     const json = await callAPI({ action: 'bookings.cancel', id, comment, by: AdminAuth.name, apiKey: AdminAuth.key });
-    this.handleResponse(json, () => {
-      const updates = { status: 'ยกเลิก' };
-      if (comment) updates.adminComment = comment;
-      this.patchBooking(id, updates);
-    });
+    this.handleResponse(json, () => this.patchBooking(id, { status: 'ยกเลิก', adminComment: comment }));
   },
 
   async deleteBooking(id) {
     if (!confirm('ลบถาวร? ไม่สามารถกู้คืนได้')) return;
+    this.expandedId = null;
     const json = await callAPI({ action: 'bookings.delete', id, by: AdminAuth.name, apiKey: AdminAuth.key });
     this.handleResponse(json, () => {
       this.state.bookings = this.state.bookings.filter(b => b.id !== id);
@@ -723,41 +916,136 @@ const AdminPage = {
     `);
   },
 
-  // ---- Move ----
+  // ---- Move (v4.2: รองรับบังคับย้ายเข้าไปในห้องที่ไม่ว่าง สำหรับกรณี VIP/พิเศษ) ----
 
   openMove(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
-
-    const options = this.state.rooms
-      .filter(r => r.name !== b.room)
-      .map(r => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)} (${r.capacity})</option>`)
-      .join('');
+    this.expandedId = null;
+    this._move = { id, selRoom: null, force: false, resolution: null };
 
     Modal.show(`
       <h3>ย้ายห้อง</h3>
       <p style="color:var(--ink-soft); font-size:13px;">
-        จาก: <strong>${escapeHtml(b.room)}</strong> →
-        ผู้ใช้: ${escapeHtml(b.userName)} (${b.attendees} คน)<br>
+        ปัจจุบัน: <strong>${escapeHtml(b.room)}</strong> — ${escapeHtml(b.userName)} (${b.attendees} คน)<br>
         วันที่: ${formatThaiDate(b.date)} เวลา ${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}
       </p>
       <label>เลือกห้องปลายทาง</label>
-      <select id="moveToRoom">${options}</select>
-      <label>หมายเหตุ (จะแนบไปกับอีเมลแจ้งผู้จอง ให้ทราบเหตุผลที่ย้ายห้อง)</label>
-      <textarea id="moveComment" rows="2" placeholder="เช่น ห้องเดิมมีงานซ่อมบำรุง / ห้องเดิมชนกับรายการอื่นที่สำคัญกว่า..."></textarea>
+      <div class="room-pick" id="movePickList"></div>
+      <div id="moveConflictBox"></div>
+      <label class="req-label">เหตุผล (จะแนบไปกับอีเมลแจ้งผู้จองว่าทำไมถึงได้ห้องนี้)</label>
+      <textarea id="moveComment" rows="2" placeholder="เช่น ห้องเดิมมีงานซ่อมบำรุง / จัดสรรให้ลูกค้า VIP..."></textarea>
+      <div class="field-error" id="moveErr"></div>
       <div class="modal-btns">
         <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doMove('${b.id}')">ย้ายเลย</button>
+        <button class="save" onclick="AdminPage.doMove()">ยืนยันย้ายห้อง</button>
       </div>
     `);
+    this.renderMovePickList();
   },
 
-  async doMove(id) {
-    const toRoom = $('moveToRoom').value;
-    if (!toRoom) return;
+  /** วาดการ์ดเลือกห้องปลายทาง พร้อมสถานะว่าง/ไม่ว่างช่วงเวลานั้น ๆ */
+  renderMovePickList() {
+    const mv = this._move;
+    const b = this.state.bookings.find(x => x.id === mv.id);
+    const others = this.state.rooms.filter(r => r.name !== b.room);
+
+    $('movePickList').innerHTML = others.map(r => {
+      const conflict = this.findConflictClient(r.name, b.date, b.startTime, b.endTime, b.id);
+      const sel = mv.selRoom === r.name;
+      return `
+        <div class="room-pick-card ${sel ? 'selected' : ''}" onclick="AdminPage.pickMoveRoom('${escapeHtml(r.name)}')">
+          <div class="room-pick-head">${escapeHtml(r.name)}
+            <span class="${conflict ? 'busy' : 'free'}">${conflict ? 'ไม่ว่าง' : 'ว่าง'}</span></div>
+          <div class="room-pick-cap">ความจุ ${r.capacity} ที่นั่ง</div>
+          ${conflict ? `<div class="room-pick-conflict">ชนกับ: ${escapeHtml(conflict.userName)} (${escapeHtml(conflict.startTime)}-${escapeHtml(conflict.endTime)})</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    this.renderMoveConflictBox();
+  },
+
+  pickMoveRoom(room) {
+    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
+    this._move.selRoom = room;
+    this._move.force = false;
+    this._move.resolution = null;
+    this.renderMovePickList();
+    this.restoreMoveComment();
+  },
+
+  setMoveForce(checked) {
+    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
+    this._move.force = checked;
+    this.renderMoveConflictBox();
+    this.restoreMoveComment();
+  },
+
+  setMoveResolution(v) {
+    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
+    this._move.resolution = v;
+    this.renderMoveConflictBox();
+    this.restoreMoveComment();
+  },
+
+  restoreMoveComment() {
+    if (this._move.savedComment !== undefined && $('moveComment')) {
+      $('moveComment').value = this._move.savedComment;
+    }
+  },
+
+  renderMoveConflictBox() {
+    const mv = this._move;
+    const b = this.state.bookings.find(x => x.id === mv.id);
+    const box = $('moveConflictBox');
+    if (!mv.selRoom) { box.innerHTML = ''; return; }
+
+    const conflict = this.findConflictClient(mv.selRoom, b.date, b.startTime, b.endTime, b.id);
+    if (!conflict) { box.innerHTML = ''; return; }
+
+    box.innerHTML = `
+      <div class="conflict-box">
+        ห้องนี้มีรายการจองอยู่แล้ว: <strong>${escapeHtml(conflict.userName)}</strong> (${escapeHtml(conflict.startTime)}-${escapeHtml(conflict.endTime)})
+        <label style="margin-top:8px;">
+          <input type="checkbox" ${mv.force ? 'checked' : ''} onchange="AdminPage.setMoveForce(this.checked)">
+          เปิดใช้งานบังคับย้าย (สำหรับ VIP/กรณีพิเศษ)
+        </label>
+        ${mv.force ? `
+          <label class="res-option"><input type="radio" name="moveRes" ${mv.resolution === 'bump' ? 'checked' : ''} onchange="AdminPage.setMoveResolution('bump')">
+            ย้ายรายการเดิม (${escapeHtml(conflict.userName)}) ไปห้องว่างอื่นให้อัตโนมัติ</label>
+          <label class="res-option"><input type="radio" name="moveRes" ${mv.resolution === 'pending' ? 'checked' : ''} onchange="AdminPage.setMoveResolution('pending')">
+            เปลี่ยนรายการเดิมเป็น "รออนุมัติ" ให้แอดมินจัดสรรใหม่เอง</label>
+        ` : ''}
+      </div>
+    `;
+  },
+
+  async doMove() {
+    const mv = this._move;
+    const err = $('moveErr');
     const comment = $('moveComment').value.trim();
-    const json = await callAPI({ action: 'bookings.move', id, toRoom, comment, by: AdminAuth.name, apiKey: AdminAuth.key });
-    this.handleResponse(json, () => this.patchBooking(id, comment ? { room: toRoom, adminComment: comment } : { room: toRoom }));
+    const b = this.state.bookings.find(x => x.id === mv.id);
+
+    if (!mv.selRoom) { err.textContent = 'เลือกห้องปลายทางก่อน'; return; }
+    const conflict = this.findConflictClient(mv.selRoom, b.date, b.startTime, b.endTime, b.id);
+    if (conflict && !mv.force) { err.textContent = 'ห้องนี้ไม่ว่าง — เปิดใช้งานบังคับย้าย หรือเลือกห้องอื่น'; return; }
+    if (conflict && mv.force && !mv.resolution) { err.textContent = 'เลือกวิธีจัดการรายการเดิมที่ถูกแทนที่ก่อน'; return; }
+    if (!comment) { err.textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งผู้จอง)'; return; }
+
+    const json = await callAPI({
+      action: 'bookings.move', id: mv.id, toRoom: mv.selRoom, comment,
+      force: !!(conflict && mv.force), resolution: conflict && mv.force ? mv.resolution : undefined,
+      by: AdminAuth.name, apiKey: AdminAuth.key
+    });
+    this.handleResponse(json, () => {
+      this.patchBooking(mv.id, { room: mv.selRoom, adminComment: comment });
+      const bumped = json.data && json.data.bumped;
+      if (bumped) {
+        if (bumped.action === 'moved') this.patchBooking(bumped.id, { room: bumped.newRoom });
+        else this.patchBooking(bumped.id, { status: 'รออนุมัติ' });
+      }
+    });
   },
 
   // ---- Swap ----
@@ -765,6 +1053,7 @@ const AdminPage = {
   openSwap(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
+    this.expandedId = null;
 
     const others = this.state.bookings.filter(x =>
       x.id !== id && x.status !== 'ยกเลิก' &&
@@ -788,11 +1077,12 @@ const AdminPage = {
       </p>
       <label>เลือกรายการ B ที่จะสลับด้วย</label>
       <select id="swapWith">${options}</select>
-      <label>หมายเหตุ (จะแนบไปกับอีเมลแจ้งผู้จองทั้งสองฝ่าย ให้ทราบเหตุผลที่สลับห้อง)</label>
+      <label class="req-label">เหตุผล (จะแนบไปกับอีเมลแจ้งผู้จองทั้งสองฝ่าย)</label>
       <textarea id="swapComment" rows="2" placeholder="เช่น สลับให้เหมาะกับจำนวนผู้เข้าร่วมของแต่ละฝ่าย..."></textarea>
+      <div class="field-error" id="swapErr"></div>
       <div class="modal-btns">
         <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doSwap('${b.id}')">สลับเลย</button>
+        <button class="save" onclick="AdminPage.doSwap('${b.id}')">ยืนยันสลับ</button>
       </div>
     `);
   },
@@ -801,13 +1091,17 @@ const AdminPage = {
     const idB = $('swapWith').value;
     if (!idB) return;
     const comment = $('swapComment').value.trim();
+    if (!comment) {
+      $('swapErr').textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งทั้งสองฝ่าย)';
+      return;
+    }
     const json = await callAPI({ action: 'bookings.swap', idA, idB, comment, by: AdminAuth.name, apiKey: AdminAuth.key });
     this.handleResponse(json, () => {
       const a = this.state.bookings.find(x => x.id === idA);
       const b = this.state.bookings.find(x => x.id === idB);
       if (a && b) {
         const tmp = a.room; a.room = b.room; b.room = tmp;
-        if (comment) { a.adminComment = comment; b.adminComment = comment; }
+        a.adminComment = comment; b.adminComment = comment;
       }
     });
   },
@@ -817,6 +1111,7 @@ const AdminPage = {
   openComplete(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
+    this.expandedId = null;
 
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
@@ -859,6 +1154,7 @@ const AdminPage = {
   openEdit(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
+    this.expandedId = null;
 
     Modal.show(`
       <h3>แก้ไขรายการ</h3>
@@ -876,14 +1172,22 @@ const AdminPage = {
       <input type="email" id="editEmail" value="${escapeHtml(b.requesterEmail || '')}" placeholder="name@company.com">
       <label>จำนวนผู้เข้าร่วม</label>
       <input type="number" id="editAttendees" value="${b.attendees || 1}" min="1">
+      <label class="req-label">เหตุผลที่แก้ไข (จะแนบไปกับอีเมลแจ้งผู้จอง)</label>
+      <textarea id="editComment" rows="2" placeholder="เช่น แก้ไขเวลาตามคำร้องขอ / แก้ไขข้อมูลผู้ติดต่อให้ถูกต้อง..."></textarea>
+      <div class="field-error" id="editErr"></div>
       <div class="modal-btns">
         <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doEdit('${b.id}')">บันทึก</button>
+        <button class="save" onclick="AdminPage.doEdit('${b.id}')">บันทึกการแก้ไข</button>
       </div>
     `);
   },
 
   async doEdit(id) {
+    const comment = $('editComment').value.trim();
+    if (!comment) {
+      $('editErr').textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งผู้จอง)';
+      return;
+    }
     const updates = {
       action: 'bookings.update',
       id: id,
@@ -894,6 +1198,7 @@ const AdminPage = {
       department: $('editDept').value.trim(),
       requesterEmail: $('editEmail').value.trim(),
       attendees: parseInt($('editAttendees').value, 10),
+      comment,
       by: AdminAuth.name,
       apiKey: AdminAuth.key
     };
@@ -901,7 +1206,8 @@ const AdminPage = {
     this.handleResponse(json, () => this.patchBooking(id, {
       date: updates.date, startTime: updates.startTime, endTime: updates.endTime,
       userName: updates.userName, department: updates.department,
-      requesterEmail: updates.requesterEmail, attendees: updates.attendees
+      requesterEmail: updates.requesterEmail, attendees: updates.attendees,
+      adminComment: comment
     }));
   },
 
@@ -1056,6 +1362,7 @@ const AdminPage = {
     $('filterRoom').value = '';
     $('filterDate').value = '';
     $('searchBox').value = '';
+    this.page = 1;
     this.renderTable();
   }
 };
@@ -1100,8 +1407,8 @@ document.addEventListener('DOMContentLoaded', function() {
     AdminPage.bindStatCards();
     $('filterStatus').addEventListener('change', () => AdminPage.renderTable());
     $('filterRoom').addEventListener('change', () => AdminPage.renderTable());
-    $('filterDate').addEventListener('change', () => AdminPage.renderTable());
-    $('searchBox').addEventListener('input', debounce(() => AdminPage.renderTable(), 200));
+    $('filterDate').addEventListener('change', () => { AdminPage.page = 1; AdminPage.renderTable(); });
+    $('searchBox').addEventListener('input', debounce(() => { AdminPage.page = 1; AdminPage.renderTable(); }, 200));
 
     // คลิกแถวในตาราง = เปิดรายละเอียด (Enter ก็ได้เมื่อโฟกัสที่แถว) / กด Esc = ปิดหน้าต่าง
     $('tableBody').addEventListener('click', e => AdminPage.onRowClick(e));
