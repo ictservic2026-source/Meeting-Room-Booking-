@@ -6,7 +6,7 @@
   <title>Admin - ระบบจองห้องประชุม</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=Taviraj:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=4.3.1">
   <style>
     .container { max-width: 1320px; margin: 0 auto; }
 
@@ -243,6 +243,55 @@
       resize: vertical; background: var(--surface-muted); margin-bottom: 10px;
     }
     .modal textarea:focus { outline: none; border-color: var(--brass); background: var(--surface); }
+
+    /* ---------- หน้าต่างแก้ไขรายการแบบหน้าเดียว (v4.3) ---------- */
+    .edit-sec { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
+    .edit-sec-title {
+      font-family: var(--font-body); font-size: 14px; font-weight: 600;
+      color: var(--brass-deep); margin: 0 0 2px;
+    }
+    .edit-hint { font-size: 12.5px; color: var(--ink-faint); margin: 4px 0 8px; line-height: 1.5; }
+    .edit-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+    .edit-grid2 .time-select { margin-bottom: 0; }
+    .note-box {
+      margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
+      background: var(--pending-bg); color: #8A5A14; font-size: 13px;
+    }
+    .chip-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+    .modal .chip-choice label {
+      display: inline-flex; align-items: center; gap: 6px; margin: 0;
+      padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px;
+      font-size: 13px; font-weight: 400; color: var(--ink); background: var(--surface-muted); cursor: pointer;
+    }
+    .modal .chip-choice label:has(input:checked) { border-color: var(--brass); background: var(--brass-tint); color: var(--brass-deep); }
+
+    .room-pick { display: grid; grid-template-columns: 1fr 1fr; max-height: none; }
+    button.room-pick-card {
+      display: block; width: 100%; text-align: left; font-family: var(--font-body); color: var(--ink);
+    }
+    button.room-pick-card:disabled { opacity: .6; cursor: not-allowed; }
+    .room-pick-card .room-pick-cap, .room-pick-card .room-pick-conflict { display: block; }
+    .conflict-box .conflict-q { margin-top: 10px; color: var(--ink); font-weight: 600; }
+    .conflict-box .res-option.is-disabled { color: var(--ink-faint); cursor: not-allowed; }
+    .conflict-box .res-option small { color: var(--ink-faint); }
+
+    .history-title { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin: 14px 0 6px; }
+    .history {
+      max-height: 220px; overflow-y: auto; border: 1px solid var(--line);
+      border-radius: var(--radius-sm); background: var(--surface-muted);
+    }
+    .history-item { padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+    .history-item:last-child { border-bottom: none; }
+    .history-meta { color: var(--ink-soft); }
+    .history-reason { color: var(--ink); margin-top: 2px; }
+    .history-details { color: var(--ink-faint); font-size: 12.5px; margin-top: 2px; word-break: break-word; }
+    .history-empty { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--ink-faint); }
+
+    .filter-row-bottom .dp-btn { padding: 8px 12px; font-size: 14px; min-width: 160px; }
+
+    @media (max-width: 620px) {
+      .edit-grid2, .room-pick { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -298,7 +347,7 @@
       <span style="font-size:12.5px; color:var(--ink-faint); font-weight:500;">วันที่</span>
       <button type="button" class="btn btn-outline" style="padding:7px 13px; font-size:12.5px;" onclick="AdminPage.setQuickDate('today')">วันนี้</button>
       <button type="button" class="btn btn-outline" style="padding:7px 13px; font-size:12.5px;" onclick="AdminPage.setQuickDate('tomorrow')">พรุ่งนี้</button>
-      <input type="date" id="filterDate">
+      <span id="filterDateWrap"></span>
       <input type="text" id="searchBox" placeholder="ค้นหาชื่อ / ฝ่าย..." style="flex:1; min-width:200px;">
       <button class="btn btn-outline" onclick="AdminPage.clearFilters()">ล้างตัวกรอง</button>
     </div>
@@ -339,7 +388,7 @@
     <table>
       <thead>
         <tr>
-          <th>วันที่ขอใช้ห้อง</th>
+          <th>วันที่ / แจ้ง</th>
           <th>เวลา</th>
           <th>ผู้ขอใช้ / ฝ่าย</th>
           <th>ห้อง</th>
@@ -364,7 +413,7 @@
 
 <!-- SheetJS: ใช้สร้างไฟล์ Excel (.xlsx) ในเบราว์เซอร์ — ถ้าโหลดไม่ได้ ระบบจะสำรองเป็น CSV ให้อัตโนมัติ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=4.3.1"></script>
 
 </body>
 </html>

@@ -1,6 +1,8 @@
 // ==========================================================
-// 🏢 ระบบจองห้องประชุม - Shared JavaScript (v4)
+// 🏢 ระบบจองห้องประชุม - Shared JavaScript (v4.3)
 // ใช้ร่วมกันระหว่าง index.html และ admin.html
+// v4.3: ปฏิทินเลือกวันแบบ DD/MM/YYYY ทุกเครื่อง · แก้ไขรายการหน้าเดียว
+//       (วัน เวลา ห้อง สลับ/บังคับย้าย ผู้จอง อุปกรณ์) · ประวัติและเหตุผลการแก้ไข
 // ==========================================================
 
 // ==========================================================
@@ -63,14 +65,13 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-/** วันนี้ในรูปแบบ YYYY-MM-DD */
-function todayStr() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+/** วันที่ (เวลาเครื่อง) → YYYY-MM-DD — ไม่ใช้ toISOString() เพราะเป็น UTC (ก่อน 07:00 จะได้วันของเมื่อวาน) */
+function isoOf(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+/** วันนี้ในรูปแบบ YYYY-MM-DD */
+function todayStr() { return isoOf(new Date()); }
 
 /** หน่วงการเรียกฟังก์ชัน (ใช้กับช่องค้นหา ลดจำนวนครั้งที่ re-render) */
 function debounce(fn, wait = 250) {
@@ -104,14 +105,18 @@ function timeSelectHTML(prefix, value, opts) {
   const parts = String(value || '').split(':');
   const h = parts[0] || '', m = parts[1] || '';
 
+  const hours = Array.from({ length: hourEnd - hourStart + 1 }, (_, i) => String(hourStart + i).padStart(2, '0'));
+  const mins = Array.from({ length: Math.ceil(60 / minuteStep) }, (_, i) => String(i * minuteStep).padStart(2, '0'));
+  // ค่าเดิมที่อยู่นอกช่วง/ไม่ตรงขั้น (เช่น 08:07 จากข้อมูลเก่า) ต้องยังเลือกอยู่ ไม่อย่างนั้นบันทึกแล้วเวลาหาย
+  if (/^\d{2}$/.test(h) && !hours.includes(h)) { hours.push(h); hours.sort(); }
+  if (/^\d{2}$/.test(m) && !mins.includes(m)) { mins.push(m); mins.sort(); }
+
   const hourOpts = ['<option value="">--</option>'].concat(
-    Array.from({ length: hourEnd - hourStart + 1 }, (_, i) => String(hourStart + i).padStart(2, '0'))
-      .map(hh => `<option value="${hh}"${hh === h ? ' selected' : ''}>${hh}</option>`)
+    hours.map(hh => `<option value="${hh}"${hh === h ? ' selected' : ''}>${hh}</option>`)
   ).join('');
 
   const minOpts = ['<option value="">--</option>'].concat(
-    Array.from({ length: Math.ceil(60 / minuteStep) }, (_, i) => String(i * minuteStep).padStart(2, '0'))
-      .map(mm => `<option value="${mm}"${mm === m ? ' selected' : ''}>${mm}</option>`)
+    mins.map(mm => `<option value="${mm}"${mm === m ? ' selected' : ''}>${mm}</option>`)
   ).join('');
 
   const hourLabel = `ชั่วโมง (${String(hourStart).padStart(2, '0')}-${String(hourEnd).padStart(2, '0')})`;
@@ -141,14 +146,169 @@ function setTimeValue(prefix, hhmm) {
 }
 
 // ==========================================================
+// 📅 DATE PICKER — ปฏิทินเลือกวันของระบบเอง แสดง DD/MM/YYYY ทุกเครื่อง
+//    <input type="date"> แสดงรูปแบบตามภาษาของเครื่อง (บางเครื่องเป็น MM/DD/YYYY)
+//    จึงแทนด้วยปุ่ม + ปฏิทิน ส่วนค่าจริงเก็บใน <input type="hidden" id="..."> เป็น YYYY-MM-DD
+//    โค้ดเดิมที่อ่าน $(id).value จึงทำงานเหมือนเดิม
+// ==========================================================
+const DatePicker = {
+  MONTHS: ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+           'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'],
+  DOW: ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'],
+  opts: {},          // id → { min, clearable, placeholder }
+  state: null,       // { id, y, m } ของปฏิทินที่เปิดอยู่
+  pop: null,
+
+  /** HTML ของช่องวันที่ — iso = ค่าเริ่มต้น "YYYY-MM-DD" หรือ '' */
+  html(id, iso, opts) {
+    this.opts[id] = opts || {};
+    const ph = this.opts[id].placeholder || 'วว/ดด/ปปปป';
+    return `<span class="dp">` +
+      `<input type="hidden" id="${id}" value="${escapeHtml(iso || '')}">` +
+      `<button type="button" class="dp-btn${iso ? '' : ' dp-empty'}" id="${id}Btn" data-dp="${id}" aria-haspopup="dialog">` +
+      `<span class="dp-text">${iso ? formatThaiDate(iso) : ph}</span>` +
+      `<svg class="dp-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>` +
+      `</button></span>`;
+  },
+
+  /** ใส่ช่องวันที่ลงใน element ที่มีอยู่ */
+  mount(wrapId, id, iso, opts) { $(wrapId).innerHTML = this.html(id, iso, opts); },
+
+  get(id) { const el = $(id); return el ? el.value : ''; },
+
+  /** ตั้งค่า (fire = true จะยิง change ให้โค้ดที่ฟังอยู่ทำงานต่อ) */
+  set(id, iso, fire) {
+    const el = $(id), btn = $(id + 'Btn');
+    if (!el) return;
+    el.value = iso || '';
+    if (btn) {
+      btn.querySelector('.dp-text').textContent = iso ? formatThaiDate(iso) : ((this.opts[id] || {}).placeholder || 'วว/ดด/ปปปป');
+      btn.classList.toggle('dp-empty', !iso);
+    }
+    if (fire) el.dispatchEvent(new Event('change', { bubbles: true }));
+  },
+
+  setDisabled(id, disabled) { const b = $(id + 'Btn'); if (b) b.disabled = !!disabled; },
+
+  open(id) {
+    const cur = this.get(id) || this.opts[id].min || todayStr();
+    const [y, m] = cur.split('-').map(Number);
+    this.state = { id, y, m: m - 1 };
+    if (!this.pop) {
+      this.pop = document.createElement('div');
+      this.pop.className = 'dp-pop';
+      this.pop.setAttribute('role', 'dialog');
+      this.pop.setAttribute('aria-label', 'เลือกวันที่');
+      document.body.appendChild(this.pop);
+      this.pop.addEventListener('click', e => this.onPopClick(e));
+    }
+    this.render();
+    this.pop.classList.add('show');
+    this.position();
+    const focusBtn = this.pop.querySelector('.dp-day.sel') || this.pop.querySelector('.dp-day.today') || this.pop.querySelector('.dp-day:not([disabled])');
+    if (focusBtn) focusBtn.focus({ preventScroll: true });
+  },
+
+  close(returnFocus) {
+    if (!this.pop || !this.state) return;
+    const id = this.state.id;
+    this.pop.classList.remove('show');
+    this.state = null;
+    if (returnFocus && $(id + 'Btn')) $(id + 'Btn').focus();
+  },
+
+  position() {
+    const btn = $(this.state.id + 'Btn');
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const w = this.pop.offsetWidth, h = this.pop.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    this.pop.style.left = Math.max(8, left) + 'px';
+    this.pop.style.top = top + 'px';
+  },
+
+  render() {
+    const { id, y, m } = this.state;
+    const o = this.opts[id] || {};
+    const sel = this.get(id), today = todayStr();
+    const first = new Date(y, m, 1).getDay();
+    const days = new Date(y, m + 1, 0).getDate();
+    const minMonth = o.min ? o.min.slice(0, 7) : null;
+    const thisMonth = `${y}-${String(m + 1).padStart(2, '0')}`;
+
+    let cells = '';
+    for (let i = 0; i < first; i++) cells += '<span></span>';
+    for (let d = 1; d <= days; d++) {
+      const iso = `${thisMonth}-${String(d).padStart(2, '0')}`;
+      const dis = o.min && iso < o.min;
+      const cls = ['dp-day', iso === sel ? 'sel' : '', iso === today ? 'today' : ''].join(' ').trim();
+      cells += `<button type="button" class="${cls}" data-iso="${iso}"${dis ? ' disabled' : ''} aria-label="${d} ${this.MONTHS[m]} ${y}"${iso === sel ? ' aria-pressed="true"' : ''}>${d}</button>`;
+    }
+
+    const canToday = !o.min || today >= o.min;
+    this.pop.innerHTML = `
+      <div class="dp-head">
+        <button type="button" class="dp-nav" data-nav="-1" aria-label="เดือนก่อน"${minMonth && thisMonth <= minMonth ? ' disabled' : ''}>‹</button>
+        <span class="dp-title">${this.MONTHS[m]} ${y}</span>
+        <button type="button" class="dp-nav" data-nav="1" aria-label="เดือนถัดไป">›</button>
+      </div>
+      <div class="dp-grid">${this.DOW.map(w => `<span class="dp-dow">${w}</span>`).join('')}${cells}</div>
+      <div class="dp-foot">
+        ${canToday ? '<button type="button" class="dp-link" data-act="today">วันนี้</button>' : '<span></span>'}
+        ${o.clearable ? '<button type="button" class="dp-link" data-act="clear">ล้าง</button>' : ''}
+      </div>`;
+  },
+
+  onPopClick(e) {
+    e.stopPropagation();
+    const t = e.target.closest('button');
+    if (!t || t.disabled || !this.state) return;
+    if (t.dataset.nav) {
+      let { y, m } = this.state;
+      m += Number(t.dataset.nav);
+      if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
+      this.state.y = y; this.state.m = m;
+      this.render();
+      return;
+    }
+    const id = this.state.id;
+    if (t.dataset.iso) { this.set(id, t.dataset.iso, true); this.close(true); }
+    else if (t.dataset.act === 'today') { this.set(id, todayStr(), true); this.close(true); }
+    else if (t.dataset.act === 'clear') { this.set(id, '', true); this.close(true); }
+  },
+
+  /** ผูกครั้งเดียวทั้งหน้า (ใช้ event delegation จึงรองรับช่องที่สร้างใหม่ใน modal ด้วย) */
+  init() {
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('.dp-btn');
+      if (btn && !btn.disabled) {
+        const id = btn.dataset.dp;
+        if (this.state && this.state.id === id) this.close(); else this.open(id);
+        return;
+      }
+      if (this.state && this.pop && !this.pop.contains(e.target)) this.close();
+    });
+    // Esc ปิดปฏิทินก่อน (ไม่ให้ปิดหน้าต่าง modal ไปพร้อมกัน)
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && this.state) { e.stopImmediatePropagation(); this.close(true); }
+    }, true);
+    window.addEventListener('resize', () => { if (this.state) this.position(); });
+    // เลื่อนหน้า/หน้าต่าง → ให้ปฏิทินเลื่อนตามช่องวันที่ (ไม่ปิดทิ้ง กันปิดเองบนมือถือ)
+    document.addEventListener('scroll', () => { if (this.state) this.position(); }, true);
+  }
+};
+
+// ==========================================================
 // 📄 INDEX PAGE — หน้าจอง (พนักงาน)
 // ==========================================================
 const IndexPage = {
   state: { rooms: [] },
 
   async init() {
-    // ตั้งวันที่เริ่มต้น
-    $('date').valueAsDate = new Date();
+    // ปฏิทินเลือกวัน (DD/MM/YYYY ทุกเครื่อง) — เลือกย้อนหลังไม่ได้ ตั้งต้นเป็นวันนี้
+    DatePicker.mount('dateWrap', 'date', todayStr(), { min: todayStr() });
     $('todayLabel').textContent = 'วันที่ ' + formatThaiDate(todayStr());
 
     // สร้าง dropdown เวลาเริ่ม-สิ้นสุด (แทน <input type="time"> เดิม)
@@ -272,6 +432,7 @@ const IndexPage = {
     const startTime = getTimeValue('startTime');
     const endTime = getTimeValue('endTime');
 
+    if (!DatePicker.get('date')) { showAlert('error', 'กรุณาเลือกวันที่ต้องการใช้'); return; }
     if (!purpose) { showAlert('error', 'กรุณาเลือกวัตถุประสงค์'); return; }
     if (!room)    { showAlert('error', 'กรุณาเลือกห้องประชุม'); return; }
     if (!startTime || !endTime) {
@@ -311,7 +472,8 @@ const IndexPage = {
       if (json.success) {
         showAlert('success', `จองสำเร็จ! รหัส: ${json.data.id}`);
         e.target.reset();
-        $('date').valueAsDate = new Date();
+        DatePicker.set('date', todayStr());
+        setTimeValue('startTime', '08:00');
         $('bookingInfo').style.display = 'none';
         $('otherEquipment').style.display = 'none';
         this.refreshRoomDots();
@@ -538,7 +700,7 @@ const AdminPage = {
           return;
         }
         if (f === '__today') {
-          $('filterDate').value = $('filterDate').value === todayStr() ? '' : todayStr();
+          DatePicker.set('filterDate', $('filterDate').value === todayStr() ? '' : todayStr());
         } else {
           $('filterStatus').value = $('filterStatus').value === f ? '' : f;
         }
@@ -597,8 +759,8 @@ const AdminPage = {
   setQuickDate(which) {
     const d = new Date();
     if (which === 'tomorrow') d.setDate(d.getDate() + 1);
-    const iso = d.toISOString().slice(0, 10);
-    $('filterDate').value = $('filterDate').value === iso ? '' : iso;
+    const iso = isoOf(d);
+    DatePicker.set('filterDate', $('filterDate').value === iso ? '' : iso);
     this.page = 1;
     this.renderTable();
   },
@@ -633,26 +795,32 @@ const AdminPage = {
     `;
   },
 
-  /** ตรวจห้องว่าง/ชนกันฝั่ง client (ใช้ตอนเปิดหน้าต่างย้าย/อนุมัติ เพื่อโชว์ผลทันทีโดยไม่ต้องรอ backend ตอบ error) */
-  findConflictClient(room, date, start, end, excludeId) {
-    for (const r of this.state.bookings) {
-      if (r.id === excludeId || r.room !== room || r.date !== date || r.status === 'ยกเลิก') continue;
+  /** ทุกรายการที่ชนกับช่วงเวลานี้ในห้องนี้ (กติกาเดียวกับ backend: ไม่นับยกเลิก, รายการที่เสร็จแล้วใช้เวลาสิ้นสุดจริง) */
+  findConflictsClient(room, date, start, end, excludeIds) {
+    const ex = [].concat(excludeIds || []);
+    return this.state.bookings.filter(r => {
+      if (ex.includes(r.id) || r.room !== room || r.date !== date || r.status === 'ยกเลิก') return false;
       const effectiveEnd = r.actualEndTime || r.endTime;
-      if ((start >= r.startTime && start < effectiveEnd) ||
-          (end > r.startTime && end <= effectiveEnd) ||
-          (start <= r.startTime && end >= effectiveEnd)) {
-        return r;
-      }
-    }
-    return null;
+      return start < effectiveEnd && end > r.startTime;
+    });
+  },
+
+  /** รายการแรกที่ชน (ใช้ในหน้าต่างอนุมัติ) */
+  findConflictClient(room, date, start, end, excludeId) {
+    return this.findConflictsClient(room, date, start, end, excludeId)[0] || null;
+  },
+
+  roomCapacity(name) {
+    const r = this.state.rooms.find(x => x.name === name);
+    return r ? Number(r.capacity) : 0;
   },
 
   /** 1 แถวของตาราง + แถวเมนู "⋯" ที่ขยายได้ (คืนมาเป็น 1 หรือ 2 <tr> รวมกัน) */
   renderRow(b) {
     const badge = this.getBadgeClass(b.status);
     const time = b.actualEndTime
-      ? `${b.startTime} - ${b.endTime} <span style="color:var(--done);">(จริง: ${b.actualEndTime})</span>`
-      : `${b.startTime} - ${b.endTime}`;
+      ? `${escapeHtml(b.startTime)} - ${escapeHtml(b.endTime)} <span style="color:var(--done);">(จริง: ${escapeHtml(b.actualEndTime)})</span>`
+      : `${escapeHtml(b.startTime)} - ${escapeHtml(b.endTime)}`;
 
     const equip = escapeHtml(b.equipment || '-') +
       (b.otherEquipment && b.otherEquipment !== '-'
@@ -678,13 +846,13 @@ const AdminPage = {
 
     const mainRow = `
       <tr class="${isDone ? 'row-done' : ''}" data-id="${escapeHtml(b.id)}" tabindex="0" title="คลิกเพื่อดูรายละเอียด">
-        <td><strong>${formatThaiDate(b.date)}</strong><br>
+        <td><strong>${escapeHtml(formatThaiDate(b.date))}</strong><br>
             <small style="color:var(--ink-faint);">แจ้ง: ${escapeHtml(b.timestamp || '-')}</small></td>
         <td>${time}</td>
         <td><strong>${escapeHtml(b.userName || '-')}</strong><br>
             <small style="color:var(--ink-soft);">${escapeHtml(b.department || '-')}</small>${email}${noteLine}</td>
         <td>${escapeHtml(b.room || '-')}</td>
-        <td style="text-align:center;">${b.attendees || 0} คน</td>
+        <td style="text-align:center;">${Number(b.attendees) || 0} คน</td>
         <td><small>${equip}</small></td>
         <td><span class="badge ${badge}">${escapeHtml(b.status)}</span></td>
         <td class="actions"><div class="actions-primary">${primary}${menuBtn}</div></td>
@@ -693,11 +861,10 @@ const AdminPage = {
 
     if (!menuOpen) return mainRow;
 
+    // v4.3: ย้ายห้อง/สลับห้อง รวมอยู่ในหน้าต่าง "แก้ไขรายการ" แล้ว
     const extraBtns = [
-      canAct ? `<button class="btn-move" onclick="AdminPage.openMove('${b.id}')">ย้ายห้อง</button>` : '',
-      canAct ? `<button class="btn-swap" onclick="AdminPage.openSwap('${b.id}')">สลับ</button>` : '',
+      `<button class="btn-edit" onclick="AdminPage.openEdit('${b.id}')">แก้ไขรายการ (วัน เวลา ห้อง ข้อมูล)</button>`,
       canAct ? `<button class="btn-cancel" onclick="AdminPage.openCancel('${b.id}')">ยกเลิก</button>` : '',
-      `<button class="btn-edit" onclick="AdminPage.openEdit('${b.id}')">แก้ไขเวลา/ข้อมูล</button>`,
       `<button class="btn-delete" onclick="AdminPage.deleteBooking('${b.id}')">ลบ</button>`
     ].join('');
 
@@ -734,9 +901,14 @@ const AdminPage = {
     Modal.show(`
       <h3>อนุมัติการจอง</h3>
       <p style="color:var(--ink-soft); font-size:13px;">
-        ${escapeHtml(b.userName)} — ห้องที่ขอ: <strong>${escapeHtml(b.room)}</strong><br>
+        ${escapeHtml(b.userName)} — ${b.requestedRoom && b.requestedRoom !== b.room
+          ? `ห้องที่ขอ: <strong>${escapeHtml(b.requestedRoom)}</strong> · ปัจจุบัน: <strong>${escapeHtml(b.room)}</strong>`
+          : `ห้องที่ขอ: <strong>${escapeHtml(b.room)}</strong>`}<br>
         วันที่: ${formatThaiDate(b.date)} เวลา ${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}
       </p>
+      ${b.requestedRoom && b.requestedRoom !== b.room
+        ? `<div class="note-box">ห้องถูกเปลี่ยนจากที่ผู้จองขอแล้ว — อีเมลยืนยันจะแจ้งว่า "ยืนยันการจอง (เปลี่ยนห้องจากที่ขอ)" พร้อมห้องที่ขอและห้องที่ได้</div>`
+        : ''}
       <label>ห้องที่จะอนุมัติ</label>
       <select id="confirmRoom" onchange="AdminPage.onConfirmRoomChange('${b.id}')">${options}</select>
       <div id="confirmConflictBox"></div>
@@ -788,7 +960,7 @@ const AdminPage = {
     });
     this.handleResponse(json, () => {
       const updates = { status: 'ยืนยันแล้ว' };
-      if (changed) updates.room = room;
+      if (changed) { updates.requestedRoom = b.requestedRoom || b.room; updates.room = room; }
       if (comment) updates.adminComment = comment;
       this.patchBooking(id, updates);
     });
@@ -909,201 +1081,14 @@ const AdminPage = {
         <dt>แก้ไขล่าสุด</dt><dd>${val(b.lastEdited)}${b.editedBy ? ' โดย ' + escapeHtml(b.editedBy) : ''}</dd>
         <dt>หมายเหตุ Admin</dt><dd>${val(b.adminComment)}</dd>
       </dl>
+      <div class="history-title">ประวัติและเหตุผล</div>
+      <div class="history" id="detailHistory"><p class="history-empty">กำลังโหลด...</p></div>
       <div class="modal-btns">
         <button class="close" onclick="Modal.close()">ปิด</button>
-        <button class="save" onclick="AdminPage.openEdit('${escapeHtml(b.id)}')">แก้ไข</button>
+        <button class="save" onclick="AdminPage.openEdit('${escapeHtml(b.id)}')">แก้ไขรายการ</button>
       </div>
     `);
-  },
-
-  // ---- Move (v4.2: รองรับบังคับย้ายเข้าไปในห้องที่ไม่ว่าง สำหรับกรณี VIP/พิเศษ) ----
-
-  openMove(id) {
-    const b = this.state.bookings.find(x => x.id === id);
-    if (!b) return;
-    this.expandedId = null;
-    this._move = { id, selRoom: null, force: false, resolution: null };
-
-    Modal.show(`
-      <h3>ย้ายห้อง</h3>
-      <p style="color:var(--ink-soft); font-size:13px;">
-        ปัจจุบัน: <strong>${escapeHtml(b.room)}</strong> — ${escapeHtml(b.userName)} (${b.attendees} คน)<br>
-        วันที่: ${formatThaiDate(b.date)} เวลา ${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}
-      </p>
-      <label>เลือกห้องปลายทาง</label>
-      <div class="room-pick" id="movePickList"></div>
-      <div id="moveConflictBox"></div>
-      <label class="req-label">เหตุผล (จะแนบไปกับอีเมลแจ้งผู้จองว่าทำไมถึงได้ห้องนี้)</label>
-      <textarea id="moveComment" rows="2" placeholder="เช่น ห้องเดิมมีงานซ่อมบำรุง / จัดสรรให้ลูกค้า VIP..."></textarea>
-      <div class="field-error" id="moveErr"></div>
-      <div class="modal-btns">
-        <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doMove()">ยืนยันย้ายห้อง</button>
-      </div>
-    `);
-    this.renderMovePickList();
-  },
-
-  /** วาดการ์ดเลือกห้องปลายทาง พร้อมสถานะว่าง/ไม่ว่างช่วงเวลานั้น ๆ */
-  renderMovePickList() {
-    const mv = this._move;
-    const b = this.state.bookings.find(x => x.id === mv.id);
-    const others = this.state.rooms.filter(r => r.name !== b.room);
-
-    $('movePickList').innerHTML = others.map(r => {
-      const conflict = this.findConflictClient(r.name, b.date, b.startTime, b.endTime, b.id);
-      const sel = mv.selRoom === r.name;
-      return `
-        <div class="room-pick-card ${sel ? 'selected' : ''}" onclick="AdminPage.pickMoveRoom('${escapeHtml(r.name)}')">
-          <div class="room-pick-head">${escapeHtml(r.name)}
-            <span class="${conflict ? 'busy' : 'free'}">${conflict ? 'ไม่ว่าง' : 'ว่าง'}</span></div>
-          <div class="room-pick-cap">ความจุ ${r.capacity} ที่นั่ง</div>
-          ${conflict ? `<div class="room-pick-conflict">ชนกับ: ${escapeHtml(conflict.userName)} (${escapeHtml(conflict.startTime)}-${escapeHtml(conflict.endTime)})</div>` : ''}
-        </div>
-      `;
-    }).join('');
-
-    this.renderMoveConflictBox();
-  },
-
-  pickMoveRoom(room) {
-    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
-    this._move.selRoom = room;
-    this._move.force = false;
-    this._move.resolution = null;
-    this.renderMovePickList();
-    this.restoreMoveComment();
-  },
-
-  setMoveForce(checked) {
-    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
-    this._move.force = checked;
-    this.renderMoveConflictBox();
-    this.restoreMoveComment();
-  },
-
-  setMoveResolution(v) {
-    const note = $('moveComment'); if (note) this._move.savedComment = note.value;
-    this._move.resolution = v;
-    this.renderMoveConflictBox();
-    this.restoreMoveComment();
-  },
-
-  restoreMoveComment() {
-    if (this._move.savedComment !== undefined && $('moveComment')) {
-      $('moveComment').value = this._move.savedComment;
-    }
-  },
-
-  renderMoveConflictBox() {
-    const mv = this._move;
-    const b = this.state.bookings.find(x => x.id === mv.id);
-    const box = $('moveConflictBox');
-    if (!mv.selRoom) { box.innerHTML = ''; return; }
-
-    const conflict = this.findConflictClient(mv.selRoom, b.date, b.startTime, b.endTime, b.id);
-    if (!conflict) { box.innerHTML = ''; return; }
-
-    box.innerHTML = `
-      <div class="conflict-box">
-        ห้องนี้มีรายการจองอยู่แล้ว: <strong>${escapeHtml(conflict.userName)}</strong> (${escapeHtml(conflict.startTime)}-${escapeHtml(conflict.endTime)})
-        <label style="margin-top:8px;">
-          <input type="checkbox" ${mv.force ? 'checked' : ''} onchange="AdminPage.setMoveForce(this.checked)">
-          เปิดใช้งานบังคับย้าย (สำหรับ VIP/กรณีพิเศษ)
-        </label>
-        ${mv.force ? `
-          <label class="res-option"><input type="radio" name="moveRes" ${mv.resolution === 'bump' ? 'checked' : ''} onchange="AdminPage.setMoveResolution('bump')">
-            ย้ายรายการเดิม (${escapeHtml(conflict.userName)}) ไปห้องว่างอื่นให้อัตโนมัติ</label>
-          <label class="res-option"><input type="radio" name="moveRes" ${mv.resolution === 'pending' ? 'checked' : ''} onchange="AdminPage.setMoveResolution('pending')">
-            เปลี่ยนรายการเดิมเป็น "รออนุมัติ" ให้แอดมินจัดสรรใหม่เอง</label>
-        ` : ''}
-      </div>
-    `;
-  },
-
-  async doMove() {
-    const mv = this._move;
-    const err = $('moveErr');
-    const comment = $('moveComment').value.trim();
-    const b = this.state.bookings.find(x => x.id === mv.id);
-
-    if (!mv.selRoom) { err.textContent = 'เลือกห้องปลายทางก่อน'; return; }
-    const conflict = this.findConflictClient(mv.selRoom, b.date, b.startTime, b.endTime, b.id);
-    if (conflict && !mv.force) { err.textContent = 'ห้องนี้ไม่ว่าง — เปิดใช้งานบังคับย้าย หรือเลือกห้องอื่น'; return; }
-    if (conflict && mv.force && !mv.resolution) { err.textContent = 'เลือกวิธีจัดการรายการเดิมที่ถูกแทนที่ก่อน'; return; }
-    if (!comment) { err.textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งผู้จอง)'; return; }
-
-    const json = await callAPI({
-      action: 'bookings.move', id: mv.id, toRoom: mv.selRoom, comment,
-      force: !!(conflict && mv.force), resolution: conflict && mv.force ? mv.resolution : undefined,
-      by: AdminAuth.name, apiKey: AdminAuth.key
-    });
-    this.handleResponse(json, () => {
-      this.patchBooking(mv.id, { room: mv.selRoom, adminComment: comment });
-      const bumped = json.data && json.data.bumped;
-      if (bumped) {
-        if (bumped.action === 'moved') this.patchBooking(bumped.id, { room: bumped.newRoom });
-        else this.patchBooking(bumped.id, { status: 'รออนุมัติ' });
-      }
-    });
-  },
-
-  // ---- Swap ----
-
-  openSwap(id) {
-    const b = this.state.bookings.find(x => x.id === id);
-    if (!b) return;
-    this.expandedId = null;
-
-    const others = this.state.bookings.filter(x =>
-      x.id !== id && x.status !== 'ยกเลิก' &&
-      x.status !== 'เสร็จสิ้น' && x.status !== 'เสร็จก่อนเวลา'
-    );
-
-    if (others.length === 0) {
-      showAlert('error', 'ไม่มีรายการอื่นให้สลับ');
-      return;
-    }
-
-    const options = others.map(x =>
-      `<option value="${x.id}">${escapeHtml(x.userName)} — ${escapeHtml(x.room)} (${escapeHtml(x.startTime)}-${escapeHtml(x.endTime)}, ${formatThaiDate(x.date)})</option>`
-    ).join('');
-
-    Modal.show(`
-      <h3>สลับห้องกับรายการอื่น</h3>
-      <p style="color:var(--ink-soft); font-size:13px;">
-        รายการ A: <strong>${escapeHtml(b.userName)}</strong> — ${escapeHtml(b.room)}
-        (${escapeHtml(b.startTime)}-${escapeHtml(b.endTime)}, ${formatThaiDate(b.date)})
-      </p>
-      <label>เลือกรายการ B ที่จะสลับด้วย</label>
-      <select id="swapWith">${options}</select>
-      <label class="req-label">เหตุผล (จะแนบไปกับอีเมลแจ้งผู้จองทั้งสองฝ่าย)</label>
-      <textarea id="swapComment" rows="2" placeholder="เช่น สลับให้เหมาะกับจำนวนผู้เข้าร่วมของแต่ละฝ่าย..."></textarea>
-      <div class="field-error" id="swapErr"></div>
-      <div class="modal-btns">
-        <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doSwap('${b.id}')">ยืนยันสลับ</button>
-      </div>
-    `);
-  },
-
-  async doSwap(idA) {
-    const idB = $('swapWith').value;
-    if (!idB) return;
-    const comment = $('swapComment').value.trim();
-    if (!comment) {
-      $('swapErr').textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งทั้งสองฝ่าย)';
-      return;
-    }
-    const json = await callAPI({ action: 'bookings.swap', idA, idB, comment, by: AdminAuth.name, apiKey: AdminAuth.key });
-    this.handleResponse(json, () => {
-      const a = this.state.bookings.find(x => x.id === idA);
-      const b = this.state.bookings.find(x => x.id === idB);
-      if (a && b) {
-        const tmp = a.room; a.room = b.room; b.room = tmp;
-        a.adminComment = comment; b.adminComment = comment;
-      }
-    });
+    this.loadHistory(b.id, 'detailHistory');
   },
 
   // ---- Complete ----
@@ -1149,66 +1134,279 @@ const AdminPage = {
     });
   },
 
-  // ---- Edit ----
+  // ---- Edit (v4.3: หน้าเดียวจบ — วัน เวลา ห้อง สลับ/บังคับย้าย ผู้จอง อุปกรณ์ เหตุผล ประวัติ) ----
+
+  EQUIP_LIST: ['LCD PROJECTOR', 'NOTEBOOK', 'ลำโพง/ไมโครโฟนปลาดาว', 'ZOOM PROGRAM'],
+  PURPOSE_LIST: ['ประชุมภายใน', 'ออนไลน์'],
+  EDIT_TIME_OPTS: { hourStart: 6, hourEnd: 20, minuteStep: 5 },
 
   openEdit(id) {
     const b = this.state.bookings.find(x => x.id === id);
     if (!b) return;
     this.expandedId = null;
 
+    const closed = this.isDone(b.status) || b.status === 'ยกเลิก';
+    const items = String(b.equipment || '').split(',').map(s => s.trim())
+      .filter(s => s && !s.startsWith('อื่นๆ:'));
+    const other = (b.otherEquipment && b.otherEquipment !== '-') ? b.otherEquipment : '';
+    const purposes = (!b.purpose || this.PURPOSE_LIST.includes(b.purpose))
+      ? this.PURPOSE_LIST : this.PURPOSE_LIST.concat([b.purpose]);
+    this._edit = { id, room: b.room, resolution: null, conflicts: [], closed };
+
     Modal.show(`
-      <h3>แก้ไขรายการ</h3>
-      <label>วันที่</label>
-      <input type="date" id="editDate" value="${b.date}">
-      <label>เวลาเริ่ม</label>
-      ${timeSelectHTML('editStart', b.startTime)}
-      <label>เวลาสิ้นสุด</label>
-      ${timeSelectHTML('editEnd', b.endTime)}
-      <label>ผู้ขอใช้</label>
-      <input type="text" id="editUser" value="${escapeHtml(b.userName || '')}">
-      <label>ฝ่าย</label>
-      <input type="text" id="editDept" value="${escapeHtml(b.department || '')}">
-      <label>อีเมลผู้แจ้ง</label>
-      <input type="email" id="editEmail" value="${escapeHtml(b.requesterEmail || '')}" placeholder="name@company.com">
-      <label>จำนวนผู้เข้าร่วม</label>
-      <input type="number" id="editAttendees" value="${b.attendees || 1}" min="1">
-      <label class="req-label">เหตุผลที่แก้ไข (จะแนบไปกับอีเมลแจ้งผู้จอง)</label>
-      <textarea id="editComment" rows="2" placeholder="เช่น แก้ไขเวลาตามคำร้องขอ / แก้ไขข้อมูลผู้ติดต่อให้ถูกต้อง..."></textarea>
-      <div class="field-error" id="editErr"></div>
-      <div class="modal-btns">
-        <button class="close" onclick="Modal.close()">ยกเลิก</button>
-        <button class="save" onclick="AdminPage.doEdit('${b.id}')">บันทึกการแก้ไข</button>
+      <div class="detail-head">
+        <div>
+          <h3>แก้ไขรายการ</h3>
+          <p class="detail-id">รหัส ${escapeHtml(b.id)} · ${escapeHtml(b.userName || '-')}</p>
+        </div>
+        <span class="badge ${this.getBadgeClass(b.status)}">${escapeHtml(b.status)}</span>
       </div>
-    `);
+      ${closed ? `<div class="note-box">รายการนี้${escapeHtml(b.status)}แล้ว แก้ได้เฉพาะข้อมูลผู้จองและอุปกรณ์</div>` : ''}
+
+      <section class="edit-sec">
+        <h4 class="edit-sec-title">วันและเวลา</h4>
+        <label for="editDateBtn">วันที่</label>
+        ${DatePicker.html('editDate', b.date)}
+        <div class="edit-grid2">
+          <div><label>เวลาเริ่ม</label>${timeSelectHTML('editStart', b.startTime, this.EDIT_TIME_OPTS)}</div>
+          <div><label>เวลาสิ้นสุด</label>${timeSelectHTML('editEnd', b.endTime, this.EDIT_TIME_OPTS)}</div>
+        </div>
+      </section>
+
+      <section class="edit-sec">
+        <h4 class="edit-sec-title">ห้อง</h4>
+        <p class="edit-hint">ห้องปัจจุบัน: <b>${escapeHtml(b.room)}</b> · ว่าง/ไม่ว่าง คิดจากวันและเวลาด้านบน · เลือกห้องที่ไม่ว่างได้ แล้วเลือกวิธีจัดการรายการเดิม (สลับ / ย้ายอัตโนมัติ / รออนุมัติ)</p>
+        <div class="room-pick" id="editRoomList"></div>
+        <div id="editConflictBox"></div>
+      </section>
+
+      <section class="edit-sec">
+        <h4 class="edit-sec-title">ผู้จอง</h4>
+        <div class="edit-grid2">
+          <div><label for="editUser">ผู้ขอใช้</label><input type="text" id="editUser" value="${escapeHtml(b.userName || '')}"></div>
+          <div><label for="editDept">ฝ่าย/แผนก</label><input type="text" id="editDept" value="${escapeHtml(b.department || '')}"></div>
+        </div>
+        <label for="editEmail">อีเมลผู้แจ้ง</label>
+        <input type="email" id="editEmail" value="${escapeHtml(b.requesterEmail || '')}" placeholder="name@nissei.co.th">
+        <div class="edit-grid2">
+          <div><label for="editAttendees">จำนวนผู้เข้าร่วม</label><input type="number" id="editAttendees" value="${Number(b.attendees) || 1}" min="1"></div>
+          <div><label>วัตถุประสงค์</label>
+            <div class="chip-choice">${purposes.map(pp =>
+              `<label><input type="radio" name="editPurpose" value="${escapeHtml(pp)}"${pp === b.purpose ? ' checked' : ''}> ${escapeHtml(pp)}</label>`).join('')}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="edit-sec">
+        <h4 class="edit-sec-title">อุปกรณ์</h4>
+        <div class="chip-choice">${this.EQUIP_LIST.map(eq =>
+          `<label><input type="checkbox" name="editEquip" value="${escapeHtml(eq)}"${items.includes(eq) ? ' checked' : ''}> ${escapeHtml(eq)}</label>`).join('')}</div>
+        <label for="editOther">อื่นๆ (โปรดระบุ)</label>
+        <input type="text" id="editOther" value="${escapeHtml(other)}" placeholder="เว้นว่างได้">
+      </section>
+
+      <section class="edit-sec">
+        <h4 class="edit-sec-title">เหตุผลที่แก้ไข</h4>
+        <label class="req-label" for="editComment">เหตุผล (แนบไปกับอีเมลแจ้งผู้จอง และเก็บไว้ในประวัติ)</label>
+        <textarea id="editComment" rows="2" placeholder="เช่น แก้ไขเวลาตามคำร้องขอ / ห้องเดิมมีงานซ่อมบำรุง..."></textarea>
+        <div class="history-title">ประวัติและเหตุผลก่อนหน้า</div>
+        <div class="history" id="editHistory"><p class="history-empty">กำลังโหลด...</p></div>
+      </section>
+
+      <div class="field-error" id="editErr" role="alert"></div>
+      <div class="modal-btns">
+        <button class="close" onclick="Modal.close()">ปิด</button>
+        <button class="save" id="editSaveBtn" onclick="AdminPage.doEdit()">บันทึกการแก้ไข</button>
+      </div>
+    `, { wide: true });
+
+    const timeIds = ['editStartHour', 'editStartMin', 'editEndHour', 'editEndMin'];
+    if (closed) {
+      DatePicker.setDisabled('editDate', true);
+      timeIds.forEach(i => { $(i).disabled = true; });
+    }
+    timeIds.concat(['editDate']).forEach(i => $(i).addEventListener('change', () => this.renderEditRooms()));
+    $('editAttendees').addEventListener('input', () => this.renderEditRooms());
+    this.renderEditRooms();
+    this.loadHistory(id, 'editHistory');
   },
 
-  async doEdit(id) {
-    const comment = $('editComment').value.trim();
-    if (!comment) {
-      $('editErr').textContent = 'กรุณาระบุเหตุผล (จำเป็นสำหรับแจ้งผู้จอง)';
-      return;
+  editSlot() {
+    return { date: DatePicker.get('editDate'), start: getTimeValue('editStart'), end: getTimeValue('editEnd') };
+  },
+
+  /** การ์ดห้องทุกห้อง + สถานะว่าง/ไม่ว่าง ตามวันเวลาที่เลือกอยู่ในฟอร์ม */
+  renderEditRooms() {
+    const e = this._edit;
+    if (!e || !$('editRoomList')) return;
+    const b = this.state.bookings.find(x => x.id === e.id);
+    const { date, start, end } = this.editSlot();
+    const timeOk = date && start && end && start < end;
+    const att = parseInt($('editAttendees').value, 10) || 0;
+
+    $('editRoomList').innerHTML = this.state.rooms.map(r => {
+      const conflicts = timeOk && !e.closed ? this.findConflictsClient(r.name, date, start, end, b.id) : [];
+      const tooSmall = att > Number(r.capacity);
+      const sel = e.room === r.name;
+      const [tag, cls] = tooSmall ? ['ที่นั่งไม่พอ', 'busy'] : conflicts.length ? ['ไม่ว่าง', 'busy'] : ['ว่าง', 'free'];
+      return `
+        <button type="button" class="room-pick-card${sel ? ' selected' : ''}" data-room="${escapeHtml(r.name)}"
+                onclick="AdminPage.pickEditRoom(this.dataset.room)" aria-pressed="${sel}"${e.closed ? ' disabled' : ''}>
+          <span class="room-pick-head"><span>${escapeHtml(r.name)}</span><span class="${cls}">${tag}</span></span>
+          <span class="room-pick-cap">ความจุ ${Number(r.capacity)} ที่นั่ง${r.name === b.room ? ' · ห้องปัจจุบัน' : ''}</span>
+          ${conflicts.length ? `<span class="room-pick-conflict">ชนกับ: ${conflicts.map(c =>
+            `${escapeHtml(c.userName)} (${escapeHtml(c.startTime)}-${escapeHtml(c.endTime)})`).join(', ')}</span>` : ''}
+        </button>`;
+    }).join('');
+    this.renderEditConflict();
+  },
+
+  /** ห้องที่เลือกไม่ว่าง → ให้เลือกวิธีจัดการรายการเดิม (สลับ / ย้ายอัตโนมัติ / รออนุมัติ) */
+  renderEditConflict() {
+    const e = this._edit;
+    const box = $('editConflictBox');
+    const b = this.state.bookings.find(x => x.id === e.id);
+    const { date, start, end } = this.editSlot();
+    const timeOk = date && start && end && start < end;
+    const slotChanged = date !== b.date || start !== b.startTime || end !== b.endTime || e.room !== b.room;
+    const conflicts = timeOk && !e.closed && slotChanged
+      ? this.findConflictsClient(e.room, date, start, end, b.id) : [];
+
+    e.conflicts = conflicts;
+    if (!conflicts.length) { e.resolution = null; box.innerHTML = ''; return; }
+
+    const roomChanged = e.room !== b.room;
+    let swapOk = false, swapWhy = '';
+    if (!roomChanged) swapWhy = 'ใช้ได้เมื่อเปลี่ยนห้อง';
+    else if (conflicts.length !== 1) swapWhy = 'ชนมากกว่า 1 รายการ';
+    else {
+      const c = conflicts[0];
+      if (Number(c.attendees) > this.roomCapacity(b.room)) swapWhy = `${b.room} จุไม่พอสำหรับ ${c.attendees} คน`;
+      else if (this.findConflictsClient(b.room, c.date, c.startTime, c.endTime, [b.id, c.id]).length) swapWhy = `${b.room} ไม่ว่างในเวลาของ ${c.userName}`;
+      else swapOk = true;
     }
-    const updates = {
-      action: 'bookings.update',
-      id: id,
-      date: $('editDate').value,
-      startTime: getTimeValue('editStart'),
-      endTime: getTimeValue('editEnd'),
-      userName: $('editUser').value.trim(),
-      department: $('editDept').value.trim(),
-      requesterEmail: $('editEmail').value.trim(),
-      attendees: parseInt($('editAttendees').value, 10),
-      comment,
-      by: AdminAuth.name,
-      apiKey: AdminAuth.key
-    };
-    const json = await callAPI(updates);
-    this.handleResponse(json, () => this.patchBooking(id, {
-      date: updates.date, startTime: updates.startTime, endTime: updates.endTime,
-      userName: updates.userName, department: updates.department,
-      requesterEmail: updates.requesterEmail, attendees: updates.attendees,
-      adminComment: comment
-    }));
+    if (e.resolution === 'swap' && !swapOk) e.resolution = null;
+
+    const who = conflicts.length === 1 ? `<b>${escapeHtml(conflicts[0].userName)}</b>` : `รายการเดิมทั้ง ${conflicts.length} รายการ`;
+    const opt = (v, label, ok, why) => `
+      <label class="res-option${ok ? '' : ' is-disabled'}">
+        <input type="radio" name="editRes" value="${v}"${e.resolution === v ? ' checked' : ''}${ok ? '' : ' disabled'} onchange="AdminPage.setEditResolution('${v}')">
+        <span>${label}${!ok && why ? ` <small>(${escapeHtml(why)})</small>` : ''}</span>
+      </label>`;
+
+    box.innerHTML = `
+      <div class="conflict-box">
+        <div>${escapeHtml(e.room)} มีรายการในช่วงนี้แล้ว: ${conflicts.map(c =>
+          `<b>${escapeHtml(c.userName)}</b> ${escapeHtml(c.startTime)}-${escapeHtml(c.endTime)} (${escapeHtml(c.status)})`).join(', ')}</div>
+        <div class="conflict-q">เลือกวิธีจัดการรายการเดิม:</div>
+        ${opt('swap', `สลับห้องกับ ${who} — ไปใช้ ${escapeHtml(b.room)} แทน`, swapOk, swapWhy)}
+        ${opt('bump', `ย้าย ${who} ไปห้องว่างอื่นที่จุพอ ให้อัตโนมัติ`, true)}
+        ${opt('pending', `เปลี่ยน ${who} เป็น "รออนุมัติ" แล้วจัดสรรใหม่เอง`, true)}
+      </div>`;
+  },
+
+  pickEditRoom(name) {
+    if (!this._edit || this._edit.closed) return;
+    this._edit.room = name;
+    this._edit.resolution = null;
+    this.renderEditRooms();
+  },
+
+  setEditResolution(v) { this._edit.resolution = v; },
+
+  async doEdit() {
+    const e = this._edit;
+    const b = this.state.bookings.find(x => x.id === e.id);
+    const err = $('editErr');
+    err.textContent = '';
+    const fail = (msg, focusId) => { err.textContent = msg; if (focusId && $(focusId)) $(focusId).focus(); };
+
+    const { date, start, end } = this.editSlot();
+    const userName = $('editUser').value.trim();
+    const department = $('editDept').value.trim();
+    const email = $('editEmail').value.trim();
+    const att = parseInt($('editAttendees').value, 10);
+    const purposeEl = document.querySelector('input[name="editPurpose"]:checked');
+    const comment = $('editComment').value.trim();
+
+    if (!date) return fail('กรุณาเลือกวันที่', 'editDateBtn');
+    if (!start || !end) return fail('กรุณาเลือกเวลาเริ่ม-สิ้นสุดให้ครบทั้งชั่วโมงและนาที', 'editStartHour');
+    if (start >= end) return fail('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่ม', 'editEndHour');
+    if (!userName) return fail('กรุณากรอกชื่อผู้ขอใช้', 'editUser');
+    if (!department) return fail('กรุณากรอกฝ่าย/แผนก', 'editDept');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('รูปแบบอีเมลไม่ถูกต้อง', 'editEmail');
+    if (!Number.isInteger(att) || att < 1) return fail('จำนวนผู้เข้าร่วมต้องเป็นตัวเลขตั้งแต่ 1 ขึ้นไป', 'editAttendees');
+    if (att > this.roomCapacity(e.room)) return fail(`${e.room} จุได้ ${this.roomCapacity(e.room)} คน — เลือกห้องที่ใหญ่ขึ้น`);
+    if (e.conflicts.length && !e.resolution) return fail('ห้องนี้ไม่ว่างในช่วงเวลานี้ — เลือกวิธีจัดการรายการเดิม หรือเปลี่ยนห้อง/เวลา');
+    if (!comment) return fail('กรุณาระบุเหตุผลที่แก้ไข (จะแนบไปกับอีเมลแจ้งผู้จอง)', 'editComment');
+
+    const equipment = Array.from(document.querySelectorAll('input[name="editEquip"]:checked')).map(x => x.value);
+    const other = $('editOther').value.trim();
+    if (other) equipment.push('อื่นๆ: ' + other);
+
+    const btn = $('editSaveBtn');
+    btn.disabled = true;
+    btn.textContent = 'กำลังบันทึก...';
+    try {
+      const json = await callAPI({
+        action: 'bookings.edit', id: e.id,
+        date, startTime: start, endTime: end, room: e.room,
+        userName, department, requesterEmail: email, attendees: att,
+        purpose: purposeEl ? purposeEl.value : b.purpose,
+        equipment, otherEquipment: other,
+        resolution: e.conflicts.length ? e.resolution : undefined,
+        comment, by: AdminAuth.name, apiKey: AdminAuth.key
+      });
+
+      if (json.success) {
+        Modal.close();
+        showAlert('success', (json.data && json.data.message) || 'บันทึกการแก้ไขสำเร็จ');
+        await this.loadData();   // โหลดใหม่ทั้งชุด — การสลับ/ย้ายอัตโนมัติกระทบรายการอื่นด้วย
+        return;
+      }
+      if (json.error && json.error.code === 'UNAUTHORIZED') { Modal.close(); this.handleResponse(json); return; }
+
+      const d = (json.error && json.error.details) || {};
+      let msg = json.message + (d.message ? ' — ' + d.message : '');
+      if (Array.isArray(d.conflictWith)) {
+        msg += ' — ชนกับ ' + d.conflictWith.map(c => `${c.user} (${c.start}-${c.end})`).join(', ') +
+               ' · ข้อมูลอาจเปลี่ยนไปแล้ว ปิดหน้าต่างแล้วกดรีเฟรช';
+      }
+      if (d.capacity) msg += ` — ห้องจุได้ ${d.capacity} คน`;
+      if (json.error && json.error.code === 'UNKNOWN_ACTION') msg = 'ระบบหลังบ้านยังเป็นเวอร์ชันเก่า — ต้อง Deploy Apps Script เป็นเวอร์ชันใหม่ก่อน';
+      fail(msg);
+    } catch (ex) {
+      fail('บันทึกไม่สำเร็จ: ' + ex.message);
+    } finally {
+      if ($('editSaveBtn')) { btn.disabled = false; btn.textContent = 'บันทึกการแก้ไข'; }
+    }
+  },
+
+  /** ประวัติ + เหตุผลทุกครั้ง จากชีต AuditLog (ใหม่สุดก่อน) */
+  async loadHistory(id, elId) {
+    const b = this.state.bookings.find(x => x.id === id);
+    const fallback = () => (b && b.adminComment)
+      ? `<div class="history-item"><div class="history-meta">หมายเหตุล่าสุด (บันทึกก่อนมีประวัติ)</div><div class="history-reason">${escapeHtml(b.adminComment)}</div></div>`
+      : '<p class="history-empty">ยังไม่มีประวัติ</p>';
+    try {
+      const json = await callAPI({ action: 'bookings.history', id, apiKey: AdminAuth.key });
+      const el = $(elId);
+      if (!el) return;                       // ปิดหน้าต่างไปแล้ว
+      if (!json.success) {
+        el.innerHTML = fallback() + (json.error && json.error.code === 'UNKNOWN_ACTION'
+          ? '<p class="history-empty">ดูประวัติได้หลัง Deploy Apps Script เวอร์ชันใหม่</p>' : '');
+        return;
+      }
+      const h = (json.data && json.data.history) || [];
+      el.innerHTML = h.length ? h.map(x => `
+        <div class="history-item">
+          <div class="history-meta"><b>${escapeHtml(x.action)}</b> · ${escapeHtml(x.time)}${x.by ? ' · โดย ' + escapeHtml(x.by) : ''}</div>
+          ${x.reason ? `<div class="history-reason">เหตุผล: ${escapeHtml(x.reason)}</div>` : ''}
+          ${x.details ? `<div class="history-details">${escapeHtml(x.details)}</div>` : ''}
+        </div>`).join('') : fallback();
+    } catch (ex) {
+      if ($(elId)) $(elId).innerHTML = fallback() + `<p class="history-empty">โหลดประวัติไม่สำเร็จ: ${escapeHtml(ex.message)}</p>`;
+    }
   },
 
   // ---- Export Excel ----
@@ -1360,7 +1558,7 @@ const AdminPage = {
   clearFilters() {
     $('filterStatus').value = '';
     $('filterRoom').value = '';
-    $('filterDate').value = '';
+    DatePicker.set('filterDate', '');
     $('searchBox').value = '';
     this.page = 1;
     this.renderTable();
@@ -1371,13 +1569,18 @@ const AdminPage = {
 // 🪟 MODAL (ใช้ในหน้า Admin)
 // ==========================================================
 const Modal = {
-  show(html) {
+  /** opts.wide = หน้าต่างกว้าง (ใช้กับแก้ไขรายการ) */
+  show(html, opts) {
     const content = $('modalContent');
     if (!content) return;
+    DatePicker.close();
+    content.classList.toggle('modal-wide', !!(opts && opts.wide));
     content.innerHTML = html;
+    content.scrollTop = 0;
     $('modalBg').classList.add('show');
   },
   close() {
+    DatePicker.close();
     const bg = $('modalBg');
     if (bg) bg.classList.remove('show');
   }
@@ -1387,6 +1590,8 @@ const Modal = {
 // 🚀 AUTO INIT — ตรวจว่าอยู่หน้าไหน แล้ว init ให้อัตโนมัติ
 // ==========================================================
 document.addEventListener('DOMContentLoaded', function() {
+  DatePicker.init();
+
   // ถ้ามีฟอร์มจอง = อยู่หน้า Index
   if ($('bookingForm')) {
     IndexPage.init();
@@ -1394,6 +1599,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ถ้ามีตาราง = อยู่หน้า Admin
   if ($('tableBody')) {
+    DatePicker.mount('filterDateWrap', 'filterDate', '', { clearable: true, placeholder: 'เลือกวันที่' });
     AdminAuth.bindGate();
 
     if (AdminAuth.isSet) {
