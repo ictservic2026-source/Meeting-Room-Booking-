@@ -6,7 +6,7 @@
   <title>Admin - ระบบจองห้องประชุม</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=Taviraj:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4.3.1">
+  <link rel="stylesheet" href="styles.css?v=4.3.2">
   <style>
     .container { max-width: 1320px; margin: 0 auto; }
 
@@ -257,6 +257,7 @@
       margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm);
       background: var(--pending-bg); color: #8A5A14; font-size: 13px;
     }
+    .note-box.note-ok { background: var(--available-bg); color: #23704A; }
     .chip-choice { display: flex; flex-wrap: wrap; gap: 8px; }
     .modal .chip-choice label {
       display: inline-flex; align-items: center; gap: 6px; margin: 0;
@@ -413,7 +414,7 @@
 
 <!-- SheetJS: ใช้สร้างไฟล์ Excel (.xlsx) ในเบราว์เซอร์ — ถ้าโหลดไม่ได้ ระบบจะสำรองเป็น CSV ให้อัตโนมัติ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="app.js?v=4.3.1"></script>
+<script src="app.js?v=4.3.2"></script>
 
 </body>
 </html>

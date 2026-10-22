@@ -1,5 +1,5 @@
 // ==========================================================
-// 🏢 ระบบจองห้องประชุม - Shared JavaScript (v4.3)
+// 🏢 ระบบจองห้องประชุม - Shared JavaScript (v4.3.2)
 // ใช้ร่วมกันระหว่าง index.html และ admin.html
 // v4.3: ปฏิทินเลือกวันแบบ DD/MM/YYYY ทุกเครื่อง · แก้ไขรายการหน้าเดียว
 //       (วัน เวลา ห้อง สลับ/บังคับย้าย ผู้จอง อุปกรณ์) · ประวัติและเหตุผลการแก้ไข
@@ -8,7 +8,7 @@
 // ==========================================================
 // ⚙️ CONFIG
 // ==========================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbzr1Eq1zE5N7KfQg8MkIIPUypA-OKBHshiOSqLtz3m4y5EkeYDfrnO3h8sf0iXJM5CZ/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbw2njcskR2L7ZjZYwSm0_YU1LEkukngXXnCwjR7a6Naw2DuJ-zZ1vWg_mcTKdurfTKa/exec";
 
 // ==========================================================
 // 🛠️ SHARED UTILITIES (ใช้ร่วมกันทั้ง 2 หน้า)
@@ -1162,6 +1162,7 @@ const AdminPage = {
         <span class="badge ${this.getBadgeClass(b.status)}">${escapeHtml(b.status)}</span>
       </div>
       ${closed ? `<div class="note-box">รายการนี้${escapeHtml(b.status)}แล้ว แก้ได้เฉพาะข้อมูลผู้จองและอุปกรณ์</div>` : ''}
+      ${b.status === 'ยืนยันแล้ว' ? `<div class="note-box note-ok">รายการนี้ยืนยันแล้ว — บันทึกการแก้ไขแล้ว ระบบจะส่งอีเมล <b>"ยืนยันการจองอีกครั้ง"</b> พร้อมรายละเอียดที่เปลี่ยน ไปที่ ${escapeHtml(b.requesterEmail || 'ผู้จอง')}</div>` : ''}
 
       <section class="edit-sec">
         <h4 class="edit-sec-title">วันและเวลา</h4>
