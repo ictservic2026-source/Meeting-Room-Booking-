@@ -325,6 +325,13 @@ const IndexPage = {
     $('otherCheck').addEventListener('change', function() {
       $('otherEquipment').style.display = this.checked ? 'block' : 'none';
     });
+    // วัตถุประสงค์ "อื่นๆ" → แสดงช่องให้พิมพ์ระบุ
+    document.querySelectorAll('input[name="purpose"]').forEach(r => r.addEventListener('change', () => {
+      const isOther = r.value === 'อื่นๆ' && r.checked;
+      $('purposeOther').style.display = isOther ? 'block' : 'none';
+      $('purposeOther').required = isOther;
+      if (isOther) $('purposeOther').focus();
+    }));
     $('bookingForm').addEventListener('submit', e => {
       e.preventDefault();
       this.submit(e);
@@ -434,7 +441,12 @@ const IndexPage = {
 
     if (!DatePicker.get('date')) { showAlert('error', 'กรุณาเลือกวันที่ต้องการใช้'); return; }
     if (!purpose) { showAlert('error', 'กรุณาเลือกวัตถุประสงค์'); return; }
-    if (!room)    { showAlert('error', 'กรุณาเลือกห้องประชุม'); return; }
+    const purposeOther = $('purposeOther').value.trim();
+    if (purpose.value === 'อื่นๆ' && !purposeOther) {
+      showAlert('error', 'กรุณาระบุวัตถุประสงค์ (อื่นๆ)'); $('purposeOther').focus(); return;
+    }
+    const purposeValue = purpose.value === 'อื่นๆ' ? 'อื่นๆ: ' + purposeOther : purpose.value;
+    if (!room)   { showAlert('error', 'กรุณาเลือกห้องประชุม'); return; }
     if (!startTime || !endTime) {
       showAlert('error', 'กรุณาเลือกเวลาเริ่มต้น-สิ้นสุดให้ครบ'); return;
     }
@@ -455,7 +467,7 @@ const IndexPage = {
       userName: $('userName').value.trim(),
       department: $('department').value.trim(),
       requesterEmail: $('requesterEmail').value.trim(),
-      purpose: purpose.value,
+      purpose: purposeValue,
       attendees: parseInt($('attendees').value, 10),
       room: room.value,
       equipment: equipment,
@@ -476,6 +488,8 @@ const IndexPage = {
         setTimeValue('startTime', '08:00');
         $('bookingInfo').style.display = 'none';
         $('otherEquipment').style.display = 'none';
+        $('purposeOther').style.display = 'none';
+        $('purposeOther').required = false;
         this.refreshRoomDots();
       } else {
         const detail = json.error?.details?.message || '';
@@ -1137,7 +1151,7 @@ const AdminPage = {
   // ---- Edit (v4.3: หน้าเดียวจบ — วัน เวลา ห้อง สลับ/บังคับย้าย ผู้จอง อุปกรณ์ เหตุผล ประวัติ) ----
 
   EQUIP_LIST: ['LCD PROJECTOR', 'NOTEBOOK', 'ลำโพง/ไมโครโฟนปลาดาว', 'ZOOM PROGRAM'],
-  PURPOSE_LIST: ['ประชุมภายใน', 'ออนไลน์'],
+  PURPOSE_LIST: ['ประชุมภายใน', 'ออนไลน์', 'อื่นๆ'],
   EDIT_TIME_OPTS: { hourStart: 6, hourEnd: 20, minuteStep: 5 },
 
   openEdit(id) {
@@ -1149,8 +1163,13 @@ const AdminPage = {
     const items = String(b.equipment || '').split(',').map(s => s.trim())
       .filter(s => s && !s.startsWith('อื่นๆ:'));
     const other = (b.otherEquipment && b.otherEquipment !== '-') ? b.otherEquipment : '';
-    const purposes = (!b.purpose || this.PURPOSE_LIST.includes(b.purpose))
-      ? this.PURPOSE_LIST : this.PURPOSE_LIST.concat([b.purpose]);
+    // วัตถุประสงค์ "อื่นๆ" เก็บในชีตเป็น "อื่นๆ: ข้อความ" → แยกออกมาใส่ช่องพิมพ์
+    const purposeStr = String(b.purpose || '');
+    const isOtherPurpose = /^อื่นๆ\s*:?/.test(purposeStr);
+    const purposeOtherText = isOtherPurpose ? purposeStr.replace(/^อื่นๆ\s*:?\s*/, '') : '';
+    const curPurpose = isOtherPurpose ? 'อื่นๆ' : purposeStr;
+    const purposes = (!curPurpose || this.PURPOSE_LIST.includes(curPurpose))
+      ? this.PURPOSE_LIST : this.PURPOSE_LIST.slice(0, -1).concat([curPurpose, 'อื่นๆ']);
     this._edit = { id, room: b.room, resolution: null, conflicts: [], closed };
 
     Modal.show(`
@@ -1193,7 +1212,10 @@ const AdminPage = {
           <div><label for="editAttendees">จำนวนผู้เข้าร่วม</label><input type="number" id="editAttendees" value="${Number(b.attendees) || 1}" min="1"></div>
           <div><label>วัตถุประสงค์</label>
             <div class="chip-choice">${purposes.map(pp =>
-              `<label><input type="radio" name="editPurpose" value="${escapeHtml(pp)}"${pp === b.purpose ? ' checked' : ''}> ${escapeHtml(pp)}</label>`).join('')}</div>
+              `<label><input type="radio" name="editPurpose" value="${escapeHtml(pp)}"${pp === curPurpose ? ' checked' : ''}> ${escapeHtml(pp)}</label>`).join('')}</div>
+            <input type="text" id="editPurposeOther" maxlength="200" value="${escapeHtml(purposeOtherText)}"
+                   placeholder="โปรดระบุวัตถุประสงค์..." aria-label="ระบุวัตถุประสงค์อื่นๆ"
+                   style="margin-top:8px;${isOtherPurpose ? '' : ' display:none;'}">
           </div>
         </div>
       </section>
@@ -1228,6 +1250,11 @@ const AdminPage = {
     }
     timeIds.concat(['editDate']).forEach(i => $(i).addEventListener('change', () => this.renderEditRooms()));
     $('editAttendees').addEventListener('input', () => this.renderEditRooms());
+    document.querySelectorAll('input[name="editPurpose"]').forEach(r => r.addEventListener('change', () => {
+      const isOther = r.value === 'อื่นๆ' && r.checked;
+      $('editPurposeOther').style.display = isOther ? '' : 'none';
+      if (isOther) $('editPurposeOther').focus();
+    }));
     this.renderEditRooms();
     this.loadHistory(id, 'editHistory');
   },
@@ -1339,6 +1366,8 @@ const AdminPage = {
     if (!Number.isInteger(att) || att < 1) return fail('จำนวนผู้เข้าร่วมต้องเป็นตัวเลขตั้งแต่ 1 ขึ้นไป', 'editAttendees');
     if (att > this.roomCapacity(e.room)) return fail(`${e.room} จุได้ ${this.roomCapacity(e.room)} คน — เลือกห้องที่ใหญ่ขึ้น`);
     if (e.conflicts.length && !e.resolution) return fail('ห้องนี้ไม่ว่างในช่วงเวลานี้ — เลือกวิธีจัดการรายการเดิม หรือเปลี่ยนห้อง/เวลา');
+    const purposeOther = $('editPurposeOther').value.trim();
+    if (purposeEl && purposeEl.value === 'อื่นๆ' && !purposeOther) return fail('กรุณาระบุวัตถุประสงค์ (อื่นๆ)', 'editPurposeOther');
     if (!comment) return fail('กรุณาระบุเหตุผลที่แก้ไข (จะแนบไปกับอีเมลแจ้งผู้จอง)', 'editComment');
 
     const equipment = Array.from(document.querySelectorAll('input[name="editEquip"]:checked')).map(x => x.value);
@@ -1353,7 +1382,7 @@ const AdminPage = {
         action: 'bookings.edit', id: e.id,
         date, startTime: start, endTime: end, room: e.room,
         userName, department, requesterEmail: email, attendees: att,
-        purpose: purposeEl ? purposeEl.value : b.purpose,
+        purpose: purposeEl ? (purposeEl.value === 'อื่นๆ' ? 'อื่นๆ: ' + purposeOther : purposeEl.value) : b.purpose,
         equipment, otherEquipment: other,
         resolution: e.conflicts.length ? e.resolution : undefined,
         comment, by: AdminAuth.name, apiKey: AdminAuth.key
