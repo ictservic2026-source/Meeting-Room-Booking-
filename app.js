@@ -304,7 +304,7 @@ const DatePicker = {
 // 📄 INDEX PAGE — หน้าจอง (พนักงาน)
 // ==========================================================
 const IndexPage = {
-  state: { rooms: [] },
+  state: { rooms: [], dayBookings: null },
 
   async init() {
     // ปฏิทินเลือกวัน (DD/MM/YYYY ทุกเครื่อง) — เลือกย้อนหลังไม่ได้ ตั้งต้นเป็นวันนี้
@@ -322,6 +322,9 @@ const IndexPage = {
       this.checkAvailability();
       this.refreshRoomDots();
     });
+    // เปลี่ยนเวลาเริ่ม/สิ้นสุด → ระบายสีห้องใหม่ทันที (ใช้ข้อมูลที่โหลดไว้ ไม่ต้องเรียก API)
+    ['startTimeHour', 'startTimeMin', 'endTimeHour', 'endTimeMin'].forEach(id =>
+      $(id).addEventListener('change', () => this.renderRoomStatus()));
     $('otherCheck').addEventListener('change', function() {
       $('otherEquipment').style.display = this.checked ? 'block' : 'none';
     });
@@ -358,7 +361,10 @@ const IndexPage = {
             <span class="room-name">${escapeHtml(r.name)}</span>
             <span class="room-capacity">${r.capacity} ที่นั่ง</span>
           </span>
-          <span class="room-dot" data-status="unknown"></span>
+          <span class="room-state">
+            <span class="room-status"></span>
+            <span class="room-dot" data-status="unknown"></span>
+          </span>
         </label>
       `).join('');
 
@@ -370,24 +376,76 @@ const IndexPage = {
     }
   },
 
-  /** อัปเดตจุดสถานะ (ว่าง/ไม่ว่าง) บนการ์ดห้องทุกห้อง ตามวันที่เลือก */
+  /**
+   * โหลดรายการจองของทุกห้องในวันที่เลือก แล้วอัปเดตสถานะบนการ์ดห้อง
+   * (เดิมเรียก rooms.availability ซึ่งบอกแค่ "ทั้งวันมีจองหรือไม่" — ไม่สนเวลาที่เลือก
+   *  ตอนนี้เก็บรายการจองไว้ แล้วเทียบกับช่วงเวลาที่เลือกในหน้า)
+   */
   async refreshRoomDots() {
     const date = $('date').value;
     if (!date) return;
-    try {
-      const json = await callAPIget({ action: 'rooms.availability', date });
-      if (!json.success) return;
+    const token = (this._dotsToken = (this._dotsToken || 0) + 1);
 
-      Object.entries(json.data.rooms).forEach(([name, info]) => {
-        const card = document.querySelector(`.room-card[data-room="${CSS.escape(name)}"]`);
-        if (!card) return;
-        const dot = card.querySelector('.room-dot');
-        dot.dataset.status = info.available ? 'available' : 'busy';
-        dot.title = info.available ? 'ว่างทั้งวัน' : 'มีรายการจองในวันนี้';
-      });
+    // ระหว่างโหลด แสดงเป็นสีเทา
+    document.querySelectorAll('.room-card').forEach(card => this.setRoomStatus(card, 'unknown', 'กำลังตรวจสอบ...'));
+
+    try {
+      const results = await Promise.all(this.state.rooms.map(async r => {
+        const json = await callAPIget({ action: 'bookings.list', date, room: r.name });
+        if (!json.success) throw new Error(json.message);
+        const active = json.data.data.filter(b => b.status === 'ยืนยันแล้ว' || b.status === 'รออนุมัติ');
+        return [r.name, active];
+      }));
+      if (token !== this._dotsToken) return; // ผู้ใช้เปลี่ยนวันไปแล้ว ทิ้งผลเก่า
+      this.state.dayBookings = { date, byRoom: Object.fromEntries(results) };
+      this.renderRoomStatus();
     } catch (err) {
+      if (token !== this._dotsToken) return;
+      this.state.dayBookings = null;
+      document.querySelectorAll('.room-card').forEach(card => this.setRoomStatus(card, 'unknown', 'โหลดสถานะไม่สำเร็จ'));
       console.warn('โหลดสถานะห้องไม่สำเร็จ', err);
     }
+  },
+
+  /**
+   * ระบายสีการ์ดห้องตามเวลาที่เลือก (ไม่เรียก API — ใช้ข้อมูลที่โหลดไว้)
+   *  - เลือกเวลาครบ: เขียว = ว่างช่วงนั้น, แดง = ชนกับรายการจอง
+   *  - ยังเลือกเวลาไม่ครบ: เขียว = ว่างทั้งวัน, เหลือง = มีจองบางช่วง
+   */
+  renderRoomStatus() {
+    const day = this.state.dayBookings;
+    if (!day || day.date !== $('date').value) return;
+    const start = getTimeValue('startTime');
+    const end = getTimeValue('endTime');
+    const hasRange = start && end && start < end;
+
+    document.querySelectorAll('.room-card').forEach(card => {
+      const bookings = day.byRoom[card.dataset.room] || [];
+      if (hasRange) {
+        // ทับกันเมื่อ start < สิ้นสุดของรายการ และ end > เริ่มของรายการ (ถ้าเลิกก่อนเวลา ใช้เวลาเสร็จจริง)
+        const clash = bookings.filter(b => start < (b.actualEndTime || b.endTime) && end > b.startTime);
+        if (clash.length) {
+          this.setRoomStatus(card, 'busy', 'ไม่ว่าง',
+            'ชนกับ ' + clash.map(b => `${b.startTime}-${b.endTime}`).join(', '));
+        } else {
+          this.setRoomStatus(card, 'available', 'ว่าง', `ว่างช่วง ${start}-${end} น.`);
+        }
+      } else if (bookings.length) {
+        this.setRoomStatus(card, 'partial', `มีจอง ${bookings.length} รายการ`, 'เลือกเวลาเพื่อดูว่าว่างหรือไม่');
+      } else {
+        this.setRoomStatus(card, 'available', 'ว่างทั้งวัน');
+      }
+    });
+  },
+
+  /** ตั้งสถานะให้การ์ดห้อง 1 ใบ (สีการ์ด + จุด + ข้อความ) */
+  setRoomStatus(card, status, label, title) {
+    card.dataset.status = status;
+    const dot = card.querySelector('.room-dot');
+    if (dot) { dot.dataset.status = status; dot.title = title || label; }
+    const tag = card.querySelector('.room-status');
+    if (tag) tag.textContent = label;
+    card.title = title || label;
   },
 
   /** ตรวจห้องว่างของห้องที่เลือกอยู่ (แบบละเอียด) */
