@@ -103,6 +103,20 @@
     }
     .room-dot[data-status="available"] { background: var(--available); }
     .room-dot[data-status="busy"] { background: var(--busy); }
+    .room-dot[data-status="partial"] { background: var(--pending); }
+
+    /* สถานะของห้องตามเวลาที่เลือก — ระบายทั้งการ์ด */
+    .room-state { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .room-status { font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .room-card[data-status="available"] { background: var(--available-bg); border-color: var(--available); }
+    .room-card[data-status="available"] .room-status { color: var(--available); }
+    .room-card[data-status="busy"] { background: var(--busy-bg); border-color: #E2B3AC; }
+    .room-card[data-status="busy"] .room-status { color: var(--busy); }
+    .room-card[data-status="partial"] .room-status { color: var(--pending); }
+    /* ห้องที่เลือกอยู่ — กรอบทองหนาขึ้น ให้เห็นชัดแม้การ์ดเป็นสีเขียว/แดง */
+    .room-card:has(input:checked) { box-shadow: 0 0 0 2px var(--brass); border-color: var(--brass); }
+    .room-card[data-status="available"]:has(input:checked) { background: var(--available-bg); }
+    .room-card[data-status="busy"]:has(input:checked) { background: var(--busy-bg); }
 
     .info-box {
       grid-column: span 2;
@@ -236,7 +250,7 @@
   </div>
 </div>
 
-<script src="app.js?v=4.3.3"></script>
+<script src="app.js?v=4.3.4"></script>
 
 </body>
 </html>
