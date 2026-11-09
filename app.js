@@ -433,7 +433,7 @@ const IndexPage = {
       } else if (bookings.length) {
         this.setRoomStatus(card, 'partial', `มีจอง ${bookings.length} รายการ`, 'เลือกเวลาเพื่อดูว่าว่างหรือไม่');
       } else {
-        this.setRoomStatus(card, 'available', 'ว่างทั้งวัน');
+        this.setRoomStatus(card, 'available', 'ว่าง');
       }
     });
   },
